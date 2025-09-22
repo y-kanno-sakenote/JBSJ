@@ -28,12 +28,12 @@ KEY_COLS = [
 BASE_COLS = [
     "No.","相対PASS","発行年","巻数","号数","開始ページ","終了ページ",
     "論文タイトル","著者","file_name","HPリンク先","PDFリンク先",
-    "対象物","研究タイプ",
+    "対象物_top3","研究タイプ_top3",
     "llm_keywords","primary_keywords","secondary_keywords","featured_keywords",
 ]
 TARGET_ORDER = [
     "清酒","ビール","ワイン","焼酎","アルコール飲料","発酵乳・乳製品",
-    "醤油","味噌","発酵食品","農産物・果実","副産物・バイオマス","酵母・微生物","その他"
+    "醤油","味噌","発酵食品","農産物・果実","副産物・バイオマス","酵母・微生物","アミノ酸・タンパク質","その他"
 ]
 TYPE_ORDER = [
     "微生物・遺伝子関連","醸造工程・製造技術","応用利用・食品開発","成分分析・物性評価",
@@ -156,7 +156,7 @@ st.title("醸造協会誌　論文検索")
 
 from pathlib import Path
 
-DEMO_CSV_PATH = Path("data/demo.csv")  # リポに同梱したテストCSV
+DEMO_CSV_PATH = Path("data/keywords_summary4.csv")  # リポに同梱したテストCSV
 SECRET_URL = st.secrets.get("GSHEET_CSV_URL", "")  # （任意）Secretsに入れておけば自動使用
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -238,11 +238,11 @@ with c_a:
     authors_all = build_author_candidates(df)
     authors_sel = st.multiselect("著者", authors_all, default=[])
 with c_tg:
-    raw_targets = {t for v in df.get("対象物", pd.Series(dtype=str)).fillna("") for t in split_multi(v)}
+    raw_targets = {t for v in df.get("対象物_top3", pd.Series(dtype=str)).fillna("") for t in split_multi(v)}
     targets_all = order_by_template(list(raw_targets), TARGET_ORDER)
     targets_sel = st.multiselect("対象物（複数選択／部分一致）", targets_all, default=[])
 with c_tp:
-    raw_types = {t for v in df.get("研究タイプ", pd.Series(dtype=str)).fillna("") for t in split_multi(v)}
+    raw_types = {t for v in df.get("研究タイプ_top3", pd.Series(dtype=str)).fillna("") for t in split_multi(v)}
     types_all = order_by_template(list(raw_types), TYPE_ORDER)
     types_sel = st.multiselect("研究タイプ（複数選択／部分一致）", types_all, default=[])
 
@@ -269,12 +269,12 @@ def apply_filters(_df: pd.DataFrame) -> pd.DataFrame:
         sel = {norm_key(a) for a in authors_sel}
         def hit_author(v): return any(norm_key(x) in sel for x in split_authors(v))
         df2 = df2[df2["著者"].apply(hit_author)]
-    if targets_sel and "対象物" in df2.columns:
+    if targets_sel and "対象物_top3" in df2.columns:
         t_norm = [norm_key(t) for t in targets_sel]
-        df2 = df2[df2["対象物"].apply(lambda v: any(t in norm_key(v) for t in t_norm))]
-    if types_sel and "研究タイプ" in df2.columns:
+        df2 = df2[df2["対象物_top3"].apply(lambda v: any(t in norm_key(v) for t in t_norm))]
+    if types_sel and "研究タイプ_top3" in df2.columns:
         t_norm = [norm_key(t) for t in types_sel]
-        df2 = df2[df2["研究タイプ"].apply(lambda v: any(t in norm_key(v) for t in t_norm))]
+        df2 = df2[df2["研究タイプ_top3"].apply(lambda v: any(t in norm_key(v) for t in t_norm))]
     toks = tokens_from_query(kw_query)
     if toks:
         def hit_kw(row):
@@ -426,7 +426,7 @@ with st.expander("🔎 タグでお気に入りを絞り込み（AND/OR）", exp
         return ", ".join(sorted(s)) if s else ""
     fav_disp_for_filter["tags"] = fav_disp_for_filter["_row_id"].apply(tags_str_for_filter)
 
-    show_cols = ["No.","発行年","巻数","号数","論文タイトル","著者","対象物","研究タイプ","HPリンク先","PDFリンク先","tags"]
+    show_cols = ["No.","発行年","巻数","号数","論文タイトル","著者","対象物_top3","研究タイプ_top3","HPリンク先","PDFリンク先","tags"]
     show_cols = [c for c in show_cols if c in fav_disp_for_filter.columns]
     st.dataframe(fav_disp_for_filter[show_cols], use_container_width=True, hide_index=True)
 
