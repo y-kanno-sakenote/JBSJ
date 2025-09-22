@@ -204,8 +204,6 @@ try:
 except Exception as e:
     err = e
 
-all_authors = sorted(set(sum(df["著者リスト"], [])))
-
 if df is None:
     if err:
         st.error(f"読み込みエラー: {err}")
@@ -247,15 +245,6 @@ with c_tp:
     raw_types = {t for v in df.get("研究タイプ_top3", pd.Series(dtype=str)).fillna("") for t in split_multi(v)}
     types_all = order_by_template(list(raw_types), TYPE_ORDER)
     types_sel = st.multiselect("研究タイプ（複数選択／部分一致）", types_all, default=[])
-
-initials = ["あ", "か", "さ", "た", "な", "は", "ま", "や", "ら", "わ"]
-selected_initial = st.sidebar.radio("頭文字ジャンプ", initials)
-
-filtered_authors = [a for a in all_authors if get_initial(a) == selected_initial]
-selected_authors = st.sidebar.multiselect("著者で絞り込み", filtered_authors)
-
-if selected_authors:
-    df = df[df["著者リスト"].apply(lambda lst: any(a in lst for a in selected_authors))]
 
 # -------------------- キーワード検索 --------------------
 c_kw1, c_kw2, c_kw3 = st.columns([3, 1, 1])
@@ -437,7 +426,7 @@ with st.expander("🔎 タグでお気に入りを絞り込み（AND/OR）", exp
         return ", ".join(sorted(s)) if s else ""
     fav_disp_for_filter["tags"] = fav_disp_for_filter["_row_id"].apply(tags_str_for_filter)
 
-    show_cols = ["No.","発行年","巻数","号数","論文タイトル","著者","対象物_top3","研究タイプ_top3","HPリンク先","PDFリンク先","tags"]
+    show_cols = ["No.","発行年","巻数","号数","論文タイトル","著者","対象物_top3","研究タイプ","HPリンク先","PDFリンク先","tags"]
     show_cols = [c for c in show_cols if c in fav_disp_for_filter.columns]
     st.dataframe(fav_disp_for_filter[show_cols], use_container_width=True, hide_index=True)
 
