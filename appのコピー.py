@@ -15,7 +15,6 @@ import io, re, time
 import pandas as pd
 import requests
 import streamlit as st
-from functools import lru_cache
 
 # -------------------- ページ設定 --------------------
 st.set_page_config(page_title="論文検索（統一UI版）", layout="wide")
@@ -168,22 +167,6 @@ def load_local_csv(path: Path) -> pd.DataFrame:
 def load_url_csv(url: str) -> pd.DataFrame:
     return ensure_cols(fetch_csv(url))
 
-@st.cache_data(show_spinner=False)
-def load_authors_csv(path_or_url: str = "authors_readings.csv") -> pd.DataFrame:
-    try:
-        df = pd.read_csv(path_or_url, encoding="utf-8")
-    except Exception:
-        df = pd.read_csv(path_or_url, encoding="utf-8-sig")
-    # 必須列の存在チェック（足りない場合は空DFを返す）
-    needed = {"author", "reading", "initial"}
-    if not needed.issubset(set(df.columns)):
-        return pd.DataFrame(columns=["author", "reading", "initial"])
-    # 重複除去・ソート
-    df = df.dropna(subset=["author"]).drop_duplicates(subset=["author"]).copy()
-    df["author"] = df["author"].astype(str).str.strip()
-    df["initial"] = df["initial"].astype(str).str.strip()
-    return df
-
 with st.sidebar:
     st.header("データ読み込み")
     st.caption("※ まずはデモ用CSVを自動ロード。URL/ファイル指定で上書きできます。")
@@ -226,51 +209,6 @@ if df is None:
         st.error(f"読み込みエラー: {err}")
     st.info("左のサイドバーで CSV を指定するか、デモCSVを有効にしてください。")
     st.stop()
-
-# =========================
-# 著者フィルタ（authors_readings.csv 利用）
-# =========================
-authors_df = load_authors_csv("authors_readings.csv")
-
-if not authors_df.empty:
-    st.sidebar.markdown("### 著者で絞り込み")
-
-    # イニシャル候補（authors_readings.csv に含まれるもののみ）
-    # 日本語 gojuon 行順 + A〜Z + その他 の順で並べる
-    jp_rows = ["あ", "か", "さ", "た", "な", "は", "ま", "や", "ら", "わ"]
-    en_rows = [chr(c) for c in range(ord("A"), ord("Z") + 1)]
-    special  = ["その他"]
-
-    present = set(authors_df["initial"].unique().tolist())
-    ordered_initials = [x for x in jp_rows + en_rows + special if x in present]
-    if not ordered_initials:
-        ordered_initials = sorted(present)
-
-    selected_initial = st.sidebar.radio("頭文字", ordered_initials, horizontal=True)
-
-    # イニシャルで著者候補を絞る
-    cand_authors = authors_df[authors_df["initial"] == selected_initial]["author"].tolist()
-
-    # 著者選択（複数可）
-    selected_authors = st.sidebar.multiselect("著者（複数選択可）", cand_authors, key="author_multiselect")
-
-    # DataFrame の「著者」列でフィルタ適用（部分一致）
-    # 著者セルがセミコロン区切り/読点などでも、部分一致で拾えるようにします。
-    if selected_authors:
-        def _author_hit(cell: str) -> bool:
-            s = str(cell or "")
-            return any(a and a in s for a in selected_authors)
-
-        if "著者" in df.columns:
-            df = df[df["著者"].apply(_author_hit)]
-        else:
-            # 念のためフォールバック（列名が違う場合）
-            # ここを使う場合は実データの列名に合わせてください
-            pass
-else:
-    # authors_readings.csv が無い/不正な場合は黙ってスキップ
-    pass
-
 
 # -------------------- 年・巻・号フィルタ --------------------
 st.subheader("年・巻・号フィルタ")
