@@ -49,14 +49,33 @@ elif data_source == "CSVファイル":
 if df is not None:
     # --- データ前処理 ---
     df.columns = [col.strip() for col in df.columns]
+    
+    # 必須の列が存在するか確認
+    required_columns = ['論文名', '著者', '発行年', '巻', '号']
+    if not all(col in df.columns for col in required_columns):
+        missing_cols = [col for col in required_columns if col not in df.columns]
+        st.error(f"必須の列が見つかりません: {missing_cols}")
+        st.stop() # プログラムの実行を停止
+
     df = df.rename(columns={'hp_link': 'HP', 'pdf_link': 'PDF'})
     df['発行年'] = df['発行年'].astype(str)
     
     # 著者名の読み仮名をCSVから結合
     if os.path.exists(YOMI_FILE):
-        df_yomi = pd.read_csv(YOMI_FILE)
-        df_yomi.columns = [col.strip() for col in df_yomi.columns]
-        df = pd.merge(df, df_yomi[['著者', 'yomi']], on='著者', how='left')
+        try:
+            df_yomi = pd.read_csv(YOMI_FILE)
+            df_yomi.columns = [col.strip() for col in df_yomi.columns]
+            
+            # `著者`と`yomi`列が存在するかチェック
+            if '著者' in df_yomi.columns and 'yomi' in df_yomi.columns:
+                df = pd.merge(df, df_yomi[['著者', 'yomi']], on='著者', how='left')
+                df['yomi'].fillna('', inplace=True)
+            else:
+                st.warning("`authors_readings.csv`に`著者`または`yomi`列が見つかりません。")
+                df['yomi'] = ''
+        except Exception as e:
+            st.warning(f"`authors_readings.csv`の読み込み中にエラーが発生しました: {e}")
+            df['yomi'] = ''
     else:
         st.warning("`authors_readings.csv`が見つかりません。著者名の読み仮名フィルタリングは使用できません。")
         df['yomi'] = ''
@@ -97,35 +116,36 @@ if df is not None:
 
     # 読み仮名でフィルタ
     if selected_kana != 'すべて':
-        if selected_kana == 'あ':
-            hiragana_range = ['あ', 'い', 'う', 'え', 'お']
-        elif selected_kana == 'か':
-            hiragana_range = ['か', 'き', 'く', 'け', 'こ']
-        elif selected_kana == 'さ':
-            hiragana_range = ['さ', 'し', 'す', 'せ', 'そ']
-        elif selected_kana == 'た':
-            hiragana_range = ['た', 'ち', 'つ', 'て', 'と']
-        elif selected_kana == 'な':
-            hiragana_range = ['な', 'に', 'ぬ', 'ね', 'の']
-        elif selected_kana == 'は':
-            hiragana_range = ['は', 'ひ', 'ふ', 'へ', 'ほ']
-        elif selected_kana == 'ま':
-            hiragana_range = ['ま', 'み', 'む', 'め', 'も']
-        elif selected_kana == 'や':
-            hiragana_range = ['や', 'ゆ', 'よ']
-        elif selected_kana == 'ら':
-            hiragana_range = ['ら', 'り', 'る', 'れ', 'ろ']
-        elif selected_kana == 'わ':
-            hiragana_range = ['わ', 'を', 'ん']
-        else: # '他' の場合
-            # ひらがなのいずれでもないもの
-            hiragana_chars = set([chr(0x3041 + i) for i in range(50)])
-            df = df[~df['yomi'].str.startswith(tuple(hiragana_chars))]
-        
-        # フィルタリングを適用
-        if selected_kana != '他':
-            df = df[df['yomi'].str.startswith(tuple(hiragana_range))]
-    
+        if 'yomi' in df.columns and df['yomi'].any():
+            if selected_kana == 'あ':
+                hiragana_range = ['あ', 'い', 'う', 'え', 'お']
+            elif selected_kana == 'か':
+                hiragana_range = ['か', 'き', 'く', 'け', 'こ']
+            elif selected_kana == 'さ':
+                hiragana_range = ['さ', 'し', 'す', 'せ', 'そ']
+            elif selected_kana == 'た':
+                hiragana_range = ['た', 'ち', 'つ', 'て', 'と']
+            elif selected_kana == 'な':
+                hiragana_range = ['な', 'に', 'ぬ', 'ね', 'の']
+            elif selected_kana == 'は':
+                hiragana_range = ['は', 'ひ', 'ふ', 'へ', 'ほ']
+            elif selected_kana == 'ま':
+                hiragana_range = ['ま', 'み', 'む', 'め', 'も']
+            elif selected_kana == 'や':
+                hiragana_range = ['や', 'ゆ', 'よ']
+            elif selected_kana == 'ら':
+                hiragana_range = ['ら', 'り', 'る', 'れ', 'ろ']
+            elif selected_kana == 'わ':
+                hiragana_range = ['わ', 'を', 'ん']
+            else: # '他' の場合
+                hiragana_chars = set(['あ', 'い', 'う', 'え', 'お', 'か', 'き', 'く', 'け', 'こ', 'さ', 'し', 'す', 'せ', 'そ', 'た', 'ち', 'つ', 'て', 'と', 'な', 'に', 'ぬ', 'ね', 'の', 'は', 'ひ', 'ふ', 'へ', 'ほ', 'ま', 'み', 'む', 'め', 'も', 'や', 'ゆ', 'よ', 'ら', 'り', 'る', 'れ', 'ろ', 'わ', 'を', 'ん'])
+                df = df[~df['yomi'].str.startswith(tuple(hiragana_chars))]
+            
+            if selected_kana != '他':
+                df = df[df['yomi'].str.startswith(tuple(hiragana_range))]
+        else:
+            st.warning("`authors_readings.csv`が見つからないか、yomi列が空のため、読み仮名での絞り込みはできません。")
+            
     # フィルタリング後の著者リストを更新
     filtered_authors = sorted([author for author in df['著者'].unique() if pd.notna(author) and author.strip() != ''])
     selected_authors = st.sidebar.multiselect("著者を選択", options=filtered_authors)
