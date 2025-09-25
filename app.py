@@ -265,18 +265,21 @@ st.subheader("検索フィルタ")
 c_a, c_tg, c_tp = st.columns([1.2, 1.2, 1.2])
 
 with c_a:
-    if authors_map:
-        # 読み(ひらがな)で検索し、表示は漢字に
-        readings = sorted(authors_map.keys())
-        selected_readings = st.multiselect(
-            "著者（読みで検索／表示は漢字）",
-            options=readings,
-            format_func=lambda r: authors_map.get(r, r),
-            default=[],
+    adf = load_authors_readings(AUTHORS_CSV_PATH)
+    if adf is not None:
+        reading2author = dict(zip(adf["reading"], adf["author"]))
+        options_readings = sorted(reading2author.keys())
+        # 検索は options（=reading）に対して行われるので、表示に reading も含める
+        authors_sel_readings = st.multiselect(
+            "著者（読みで検索可 / 表示は漢字＋読み）",
+            options=options_readings,
+            format_func=lambda r: f"{reading2author.get(r, r)}｜{r}",
+            placeholder="例：やまだ / さとう / たかはし ..."
         )
-        authors_sel = [authors_map[r] for r in selected_readings]
+        # 後段のフィルタは従来通り「著者（漢字）」で行いたいので、変換して authors_sel に入れる
+        authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
     else:
-        # フォールバック：従来の「著者」列から候補を構築
+        # フォールバック：従来の著者 multiselect
         authors_all = build_author_candidates(df)
         authors_sel = st.multiselect("著者", authors_all, default=[])
 
