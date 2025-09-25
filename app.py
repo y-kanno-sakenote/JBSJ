@@ -51,7 +51,7 @@ if df is not None:
     df.columns = [col.strip() for col in df.columns]
     
     # 必須の列が存在するか確認
-    required_columns = ['論文名', '著者', '発行年', '巻', '号']
+    required_columns = ['論文タイトル', '著者', '発行年', '巻数', '号数']
     if not all(col in df.columns for col in required_columns):
         missing_cols = [col for col in required_columns if col not in df.columns]
         st.error(f"必須の列が見つかりません: {missing_cols}")
@@ -96,16 +96,16 @@ if df is not None:
         )
         df = df[(df['発行年'].astype(int) >= min_year_val) & (df['発行年'].astype(int) <= max_year_val)]
 
-    # 2. 巻・号でフィルタ
-    unique_volumes = sorted(df['巻'].unique())
-    selected_volumes = st.sidebar.multiselect("巻を選択", options=unique_volumes, default=unique_volumes)
+    # 2. 巻数・号数でフィルタ
+    unique_volumes = sorted(df['巻数'].unique())
+    selected_volumes = st.sidebar.multiselect("巻数を選択", options=unique_volumes, default=unique_volumes)
     if selected_volumes:
-        df = df[df['巻'].isin(selected_volumes)]
+        df = df[df['巻数'].isin(selected_volumes)]
     
-    unique_issues = sorted(df['号'].unique())
-    selected_issues = st.sidebar.multiselect("号を選択", options=unique_issues, default=unique_issues)
+    unique_issues = sorted(df['号数'].unique())
+    selected_issues = st.sidebar.multiselect("号数を選択", options=unique_issues, default=unique_issues)
     if selected_issues:
-        df = df[df['号'].isin(selected_issues)]
+        df = df[df['号数'].isin(selected_issues)]
 
     # 3. 著者でフィルタ
     st.sidebar.subheader("著者")
@@ -187,11 +187,11 @@ if df is not None:
     if 'favorites' not in st.session_state:
         st.session_state.favorites = pd.DataFrame(columns=df.columns)
     
-    merged_df = pd.merge(df, st.session_state.favorites[['論文名']], on='論文名', how='left', indicator=True)
+    merged_df = pd.merge(df, st.session_state.favorites[['論文タイトル']], on='論文タイトル', how='left', indicator=True)
     df['★'] = merged_df['_merge'] == 'both'
 
     # 結果テーブル表示
-    st.dataframe(df[['★', '論文名', '著者', '発行年', 'HP', 'PDF']], hide_index=True)
+    st.dataframe(df[['★', '論文タイトル', '著者', '発行年', 'HP', 'PDF']], hide_index=True)
 
     # ダウンロード機能
     st.markdown("---")
@@ -225,7 +225,7 @@ if df is not None:
         if fav_search_query:
             filtered_favs = apply_keyword_filter(filtered_favs, fav_search_query, fav_and_or_logic, search_columns=['tags'])
         
-        edited_df = st.data_editor(filtered_favs[['論文名', '著者', '発行年', 'tags', 'HP', 'PDF']], hide_index=True, num_rows="dynamic", use_container_width=True)
+        edited_df = st.data_editor(filtered_favs[['論文タイトル', '著者', '発行年', 'tags', 'HP', 'PDF']], hide_index=True, num_rows="dynamic", use_container_width=True)
         st.session_state.favorites['tags'] = edited_df['tags']
         
         # ダウンロード
@@ -249,7 +249,7 @@ def apply_keyword_filter(df, query, logic, search_full_text=False, search_column
     if not keywords:
         return df
 
-    search_cols = ['論文名', '著者', 'キーワード', '要旨']
+    search_cols = ['論文タイトル', '著者', 'キーワード', '要旨']
     if search_full_text:
         search_cols.append('pdf_text')
     if search_columns:
