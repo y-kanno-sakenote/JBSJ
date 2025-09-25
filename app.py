@@ -1,209 +1,206 @@
+# app.py
 # -*- coding: utf-8 -*-
-import streamlit as st
+
 import pandas as pd
+import streamlit as st
 import re
-from functools import lru_cache
+from io import StringIO
+from urllib.parse import urlparse
 
-st.set_page_config(page_title="論文検索（JBSJ）", layout="wide")
+# ========= 設定 =========
+CSV_URL = "keywords_summary4.csv"  # 直接同梱ファイルを読む。URLにしてもOK
+AUTHORS_CSV = "authors_readings.csv"  # あれば使用（author, initial 列）
+AUTHOR_SEP_CANDIDATES = [";", "；", "、", ",", "／", "/"]
 
-# =========================
-# 設定
-# =========================
-DEFAULT_DATA_PATH = "keywords_summary4.csv"     # 本体データ（あなたの新CSV）
-AUTHORS_CSV_PATH  = "authors_readings.csv"      # 著者リスト（author, reading, initial）
-
-# 対象物・研究タイプは top3 を優先、無ければ all にフォールバック
-TARGET_COL_PREFS = ["対象物_top3", "対象物_all"]
-TYPE_COL_PREFS   = ["研究タイプ_top3", "研究タイプ_all"]
-
-# =========================
-# ユーティリティ
-# =========================
+# ========= ユーティリティ =========
 @st.cache_data(show_spinner=False)
 def load_csv(path_or_url: str) -> pd.DataFrame:
-    # 文字化け回避で複数エンコーディングを順に試す
-    for enc in ("utf-8", "utf-8-sig", "cp932", "shift_jis"):
-        try:
-            df = pd.read_csv(path_or_url, encoding=enc)
-            return df
-        except Exception:
-            continue
-    return pd.read_csv(path_or_url)
+    return pd.read_csv(path_or_url, encoding="utf-8")
 
 @st.cache_data(show_spinner=False)
-def load_authors_csv(path: str) -> pd.DataFrame:
-    df = pd.read_csv(path, encoding="utf-8")
-    # 想定列: author, reading, initial
-    # なければ空で返す
-    expected = {"author","reading","initial"}
-    if not expected.issubset(set(df.columns)):
-        return pd.DataFrame(columns=["author","reading","initial"])
-    # 欠損を空文字に
-    for c in ["author","reading","initial"]:
-        df[c] = df[c].fillna("").astype(str)
-    # 重複除去
-    df = df.drop_duplicates(subset=["author"]).reset_index(drop=True)
-    return df
-
-def pick_first_existing_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
-    for c in candidates:
-        if c in df.columns:
-            return c
+def load_authors_csv(path: str) -> pd.DataFrame | None:
+    try:
+        df = pd.read_csv(path, encoding="utf-8")
+        if {"author", "initial"}.issubset(df.columns):
+            # 重複や空白を整理
+            df["author"] = df["author"].astype(str).str.strip()
+            df["initial"] = df["initial"].astype(str).str.strip()
+            df = df[(df["author"] != "") & (df["initial"] != "")]
+            return df.drop_duplicates(subset=["author", "initial"])
+    except Exception:
+        pass
     return None
 
-# 五十音の行→その行の頭文字一覧
-_GOJUON = {
-    "あ": list("あいうえお"),
-    "か": list("かきくけこがぎぐげご"),
-    "さ": list("さしすせそざじずぜぞ"),
-    "た": list("たちつてとだぢづでど"),
-    "な": list("なにぬねの"),
-    "は": list("はひふへほばびぶべぼぱぴぷぺぽ"),
-    "ま": list("まみむめも"),
-    "や": list("やゆよ"),
-    "ら": list("らりるれろ"),
-    "わ": list("わをん"),
-}
-
-def get_subinitials(row_label: str) -> list[str]:
-    return _GOJUON.get(row_label, [])
-
-def split_semi(s: str) -> list[str]:
-    if not isinstance(s, str):
+def split_authors_cell(cell: str) -> list[str]:
+    if not isinstance(cell, str):
         return []
-    return [x.strip() for x in re.split(r"[;；]", s) if x and x.strip()]
+    s = cell.strip()
+    if not s:
+        return []
+    pat = r"|".join(map(re.escape, AUTHOR_SEP_CANDIDATES))
+    parts = [re.sub(r"[ \u3000]+", " ", p.strip()) for p in re.split(pat, s)]
+    return [p for p in parts if p]
 
-# =========================
-# UI: データ読み込み
-# =========================
+def build_clickable_link(url: str, label: str) -> str:
+    if isinstance(url, str) and url.strip():
+        return f'<a href="{url}" target="_blank" rel="noopener noreferrer">{label}</a>'
+    return ""
+
+def ensure_columns(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    for c in cols:
+        if c not in df.columns:
+            df[c] = ""
+    return df
+
+# ========= 画面 =========
+st.set_page_config(page_title="論文検索", layout="wide")
 st.title("論文検索（JBSJ）")
 
-with st.sidebar:
-    st.subheader("データ読み込み")
-    csv_path = st.text_input("データCSVパス/URL", value=DEFAULT_DATA_PATH)
-    authors_path = st.text_input("著者CSV（authors_readings.csv）", value=AUTHORS_CSV_PATH)
+# データ読み込み
+df = load_csv(CSV_URL)
 
-df = load_csv(csv_path)
-authors_df = load_authors_csv(authors_path)
-
-if df.empty:
-    st.error("データCSVが読み込めませんでした。パス/URLをご確認ください。")
-    st.stop()
-
-# 列存在チェック（対象物/研究タイプ）
-target_col = pick_first_existing_column(df, TARGET_COL_PREFS)
-type_col   = pick_first_existing_column(df, TYPE_COL_PREFS)
-
-# =========================
-# UI: 検索フィルタ
-# =========================
-st.sidebar.subheader("検索フィルタ")
-
-# キーワード（全文/タイトル/キーワード列に対して簡易AND）
-query = st.sidebar.text_input("キーワード（スペース区切りでAND）", value="").strip()
-
-# 対象物・研究タイプ（top3優先でプルダウン）
-if target_col:
-    target_all = sorted({t for row in df[target_col].fillna("").astype(str) for t in split_semi(row)} - {""})
-    sel_target = st.sidebar.multiselect("対象物で絞り込み（top3優先）", target_all, default=[])
-else:
-    sel_target = []
-
-if type_col:
-    type_all = sorted({t for row in df[type_col].fillna("").astype(str) for t in split_semi(row)} - {""})
-    sel_type = st.sidebar.multiselect("研究タイプで絞り込み（top3優先）", type_all, default=[])
-else:
-    sel_type = []
-
-# ===== 著者フィルタ（あかさたな + 行内頭文字 + オートコンプリート） =====
-st.sidebar.markdown("---")
-st.sidebar.markdown("#### 著者フィルタ（段階絞り込み）")
-
-row_labels = ["あ","か","さ","た","な","は","ま","や","ら","わ","A〜Z","その他"]
-selected_row = st.sidebar.radio("頭文字行", options=row_labels, horizontal=True, index=0)
-
-# 行の候補作成
-filtered_authors_df = authors_df.copy()
-if selected_row == "A〜Z":
-    # 英字A〜Zの initial 想定
-    filtered_authors_df = filtered_authors_df[filtered_authors_df["initial"].str.match(r"^[A-Z]$")]
-elif selected_row == "その他":
-    # 既存initialが「その他」
-    filtered_authors_df = filtered_authors_df[filtered_authors_df["initial"] == "その他"]
-else:
-    filtered_authors_df = filtered_authors_df[filtered_authors_df["initial"] == selected_row]
-
-# 二段階目（その行の中の頭文字 selectbox）
-suboptions = get_subinitials(selected_row)
-selected_sub = None
-if suboptions:
-    selected_sub = st.sidebar.selectbox("行内の頭文字", ["（すべて）"] + suboptions, index=0)
-    if selected_sub != "（すべて）":
-        # reading がその仮名で始まる著者に限定
-        mask = filtered_authors_df["reading"].str.startswith(selected_sub, na=False)
-        filtered_authors_df = filtered_authors_df[mask]
-
-# 最終候補（authorのユニークリスト）
-author_candidates = sorted(filtered_authors_df["author"].unique().tolist())
-selected_authors = st.sidebar.multiselect("著者で絞り込み", options=author_candidates, default=[])
-
-# =========================
-# データ絞り込みロジック
-# =========================
-view = df.copy()
-
-# キーワード（AND）
-if query:
-    terms = [t for t in re.split(r"\s+", query) if t]
-    for t in terms:
-        # タイトル・要約・キーワード的な列にヒットさせる（存在すれば）
-        hits = pd.Series(False, index=view.index)
-        for col in ["論文タイトル", "llm_keywords", "primary_keywords", "secondary_keywords"]:
-            if col in view.columns:
-                hits = hits | view[col].fillna("").astype(str).str.contains(re.escape(t), case=False, na=False)
-        # 本文列があれば（任意）
-        if "__text__" in view.columns:
-            hits = hits | view["__text__"].fillna("").astype(str).str.contains(re.escape(t), case=False, na=False)
-        view = view[hits]
-
-# 対象物
-if sel_target and target_col:
-    mask = pd.Series(False, index=view.index)
-    vc = view[target_col].fillna("").astype(str)
-    for t in sel_target:
-        mask = mask | vc.str.contains(rf"(^|[;；])\s*{re.escape(t)}\s*($|[;；])")
-    view = view[mask]
-
-# 研究タイプ
-if sel_type and type_col:
-    mask = pd.Series(False, index=view.index)
-    vc = view[type_col].fillna("").astype(str)
-    for t in sel_type:
-        mask = mask | vc.str.contains(rf"(^|[;；])\s*{re.escape(t)}\s*($|[;；])")
-    view = view[mask]
-
-# 著者（部分一致 OR；セル内セパレータに依らず）
-if selected_authors and "著者" in view.columns:
-    mask = pd.Series(False, index=view.index)
-    col = view["著者"].fillna("").astype(str)
-    for a in selected_authors:
-        mask = mask | col.str.contains(re.escape(a))
-    view = view[mask]
-
-st.write(f"ヒット件数: {len(view):,}")
-
-# =========================
-# 表示
-# =========================
-# よく見る列を並べ替え（存在するものだけ）
-prefer_cols = [
-    "No.","発行年","巻数","号数","開始ページ","終了ページ",
+# 想定列の補完
+needed_cols = [
+    "発行年","巻数","号数","開始ページ","終了ページ",
     "論文タイトル","著者","file_name","HPリンク先","PDFリンク先",
     "llm_keywords","primary_keywords","secondary_keywords",
     "対象物_top3","研究タイプ_top3","対象物_all","研究タイプ_all"
 ]
-cols = [c for c in prefer_cols if c in view.columns] + [c for c in view.columns if c not in prefer_cols]
-st.dataframe(view[cols], use_container_width=True, height=600)
+df = ensure_columns(df, needed_cols)
 
-# クリックしやすいリンク化（オプション）
-st.caption("※ HPリンク先 / PDFリンク先 は列をコピーしてブラウザで開いてください。")
+# 数値っぽい列は表示用に整数フォーマット文字列を別途用意
+for c in ["発行年","巻数","号数","開始ページ","終了ページ"]:
+    if c in df.columns:
+        # NaN対策して整数化（できるもののみ）
+        def _fmt_int(x):
+            try:
+                if pd.isna(x) or str(x).strip()=="":
+                    return ""
+                return str(int(float(x)))
+            except Exception:
+                return str(x)
+        df[f"{c}_表示"] = df[c].apply(_fmt_int)
+
+# クリック用リンク列（HTML）
+df["_HP"] = df["HPリンク先"].apply(lambda x: build_clickable_link(x, "HP"))
+df["_PDF"] = df["PDFリンク先"].apply(lambda x: build_clickable_link(x, "PDF"))
+
+# 著者候補（authors_readings.csv があればそれを使用）
+authors_df = load_authors_csv(AUTHORS_CSV)
+use_external_authors = authors_df is not None
+
+# === フィルタ（メインエリア） ===
+st.subheader("検索条件")
+
+col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
+
+with col1:
+    kw = st.text_input("フリーワード（タイトル / 要約 / キーワード）", "")
+with col2:
+    years = sorted([v for v in set(df["発行年"]) if pd.notna(v)])
+    year_sel = st.multiselect("発行年", [str(int(float(y))) if str(y).replace('.0','').isdigit() else str(y) for y in years])
+with col3:
+    targets_sel = st.multiselect("対象物（top3）", sorted([x for x in set(sum([str(v).split(";") for v in df["対象物_top3"].fillna("")], [])) if x.strip()]))
+with col4:
+    types_sel = st.multiselect("研究タイプ（top3）", sorted([x for x in set(sum([str(v).split(";") for v in df["研究タイプ_top3"].fillna("")], [])) if x.strip()]))
+
+# 著者フィルタ（頭文字 → 候補 → 選択）
+st.markdown("#### 著者で絞り込み")
+colA, colB = st.columns([1, 3])
+
+if use_external_authors:
+    # 頭文字集合（日本語：あ/か/…/わ、英語：A〜Z）
+    initials_order = ["あ","か","さ","た","な","は","ま","や","ら","わ"] + [chr(c) for c in range(ord("A"), ord("Z")+1)]
+    initials_in_data = [i for i in initials_order if i in set(authors_df["initial"])]
+
+    with colA:
+        init_selected = st.radio("頭文字", initials_in_data, horizontal=True)
+    # その頭文字の著者候補
+    cand_authors = authors_df[authors_df["initial"]==init_selected]["author"].drop_duplicates().tolist()
+    with colB:
+        author_sel = st.multiselect("著者（頭文字で候補絞り込み済）", cand_authors)
+else:
+    st.caption("authors_readings.csv が見つからないため、著者はセル分割の簡易推定です。")
+    # 著者セルを分割して一意化
+    all_auths = set()
+    for cell in df["著者"].fillna("").astype(str):
+        all_auths.update(split_authors_cell(cell))
+    cand_authors = sorted(all_auths)
+    with colB:
+        author_sel = st.multiselect("著者", cand_authors)
+
+st.divider()
+
+# ====== フィルタ適用 ======
+f = df.copy()
+
+# 発行年
+if year_sel:
+    f = f[f["発行年"].astype(str).isin(set(year_sel))]
+
+# 対象物 / 研究タイプ（top3）
+def contains_any(cell: str, terms: list[str]) -> bool:
+    if not terms:
+        return True
+    s = str(cell or "")
+    return any(t.strip() and t.strip() in s for t in terms)
+
+if targets_sel:
+    f = f[f["対象物_top3"].apply(lambda x: contains_any(x, targets_sel))]
+if types_sel:
+    f = f[f["研究タイプ_top3"].apply(lambda x: contains_any(x, types_sel))]
+
+# 著者
+if author_sel:
+    def _has_author(cell: str) -> bool:
+        # セル内に author_sel のいずれかが含まれるか
+        authors = split_authors_cell(cell)
+        return any(a in authors for a in author_sel)
+    f = f[f["著者"].apply(_has_author)]
+
+# フリーワード（タイトル/要約/キーワードでざっくり）
+if kw.strip():
+    pat = re.compile(re.escape(kw.strip()), re.IGNORECASE)
+    def _hit(row) -> bool:
+        hay = " ".join([
+            str(row.get("論文タイトル","")),
+            str(row.get("llm_keywords","")),
+            str(row.get("primary_keywords","")),
+            str(row.get("secondary_keywords","")),
+        ])
+        return bool(pat.search(hay))
+    f = f[f.apply(_hit, axis=1)]
+
+# ====== 表示 ======
+st.subheader("検索結果")
+
+# 表示用の列順・ラベル調整
+display_cols = [
+    "発行年_表示","巻数_表示","号数_表示","開始ページ_表示","終了ページ_表示",
+    "論文タイトル","著者","_HP","_PDF",
+    "対象物_top3","研究タイプ_top3","llm_keywords","primary_keywords","secondary_keywords",
+]
+display_names = {
+    "発行年_表示":"発行年","巻数_表示":"巻数","号数_表示":"号数",
+    "開始ページ_表示":"開始ページ","終了ページ_表示":"終了ページ",
+    "論文タイトル":"論文タイトル","著者":"著者","_HP":"HP","_PDF":"PDF",
+    "対象物_top3":"対象物(top3)","研究タイプ_top3":"研究タイプ(top3)",
+    "llm_keywords":"llm_keywords",
+    "primary_keywords":"primary_keywords",
+    "secondary_keywords":"secondary_keywords",
+}
+
+f_show = f.copy()
+for c in display_cols:
+    if c not in f_show.columns:
+        f_show[c] = ""
+
+f_show = f_show[display_cols].rename(columns=display_names)
+
+# HTMLテーブルでリンクを有効化
+st.markdown(
+    f_show.to_html(escape=False, index=False),
+    unsafe_allow_html=True
+)
+
+st.caption(f"件数: {len(f_show)} / 全{len(df)}")
