@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """
 論文検索（統一UI版：お気に入りにタグを“表で直接入力”）
+※ 著者フィルタのみオートコンプリート化（候補は authors_readings.csv の author 列）
 
-機能:
-- 発行年レンジ、巻・号（複数選択）、著者（正規化・複数選択）、対象物/研究タイプ（部分一致・複数選択）
+機能（元のまま）:
+- 発行年レンジ、巻・号（複数選択）、著者（複数選択）
+- 対象物/研究タイプ（部分一致・複数選択）
 - キーワード AND/OR 検索（空白/カンマ区切り、pdf_text を含めるか選択可能）
 - 検索結果テーブル（不要列の非表示、HP/PDF のリンク化、★でお気に入り）
 - お気に入り一覧（常設・★で解除/追加）
@@ -12,6 +14,8 @@
 """
 
 import io, re, time
+from pathlib import Path
+
 import pandas as pd
 import requests
 import streamlit as st
@@ -33,12 +37,13 @@ BASE_COLS = [
 ]
 TARGET_ORDER = [
     "清酒","ビール","ワイン","焼酎","アルコール飲料","発酵乳・乳製品",
-    "醤油","味噌","発酵食品","農産物・果実","副産物・バイオマス","酵母・微生物","アミノ酸・タンパク質","その他"
+    "醤油","味噌","発酵食品","農産物・果実","副産物・バイオマス",
+    "酵母・微生物","アミノ酸・タンパク質","その他"
 ]
 TYPE_ORDER = [
     "微生物・遺伝子関連","醸造工程・製造技術","応用利用・食品開発","成分分析・物性評価",
-    "品質評価・官能評価","歴史・文化・経済","健康機能・栄養効果","統計解析・モデル化",
-    "環境・サステナビリティ","保存・安定性","その他（研究タイプ）"
+    "品質評価・官能評価","歴史・文化・経済","健康機能・栄養効果",
+    "統計解析・モデル化","環境・サステナビリティ","保存・安定性","その他（研究タイプ）"
 ]
 
 # -------------------- ユーティリティ --------------------
@@ -52,8 +57,9 @@ def norm_key(s: str) -> str:
 
 AUTHOR_SPLIT_RE = re.compile(r"[;；,、，/／|｜]+")
 def split_authors(cell):
-    if not cell: return []
-    return [w.strip() for w in AUTHOR_SPLIT_RE.split(str(cell)) if w.strip()]
+    if not isinstance(cell, str):
+        return []
+    return [w.strip() for w in AUTHOR_SPLIT_RE.split(cell) if w.strip()]
 
 def split_multi(s):
     if not s: return []
@@ -73,29 +79,8 @@ def ensure_cols(df: pd.DataFrame) -> pd.DataFrame:
     df.columns = [str(c).strip() for c in df.columns]
     return df
 
-
-
-
-def consolidate_authors_column(df: pd.DataFrame) -> pd.DataFrame:
-    """著者列：空白では分割せず、区切り記号のみで分割→同名異表記を代表表記に統合"""
-    if "著者" not in df.columns:
-        return df
-    df = df.copy()
-    def unify(cell: str) -> str:
-        names = split_authors(cell)
-        seen = set()
-        result = []
-        for n in names:
-            k = norm_key(n)
-            if not k or k in seen:
-                continue
-            seen.add(k)
-            result.append(n)
-        return ", ".join(result)
-    df["著者"] = df["著者"].astype(str).apply(unify)
-    return df
-
-def build_author_candidates(df: pd.DataFrame):
+def build_author_candidates_from_df(df: pd.DataFrame):
+    """従来法：論文CSVから候補生成（フォールバック用）"""
     rep = {}
     for v in df.get("著者", pd.Series(dtype=str)).fillna(""):
         for name in split_authors(v):
@@ -116,13 +101,14 @@ def haystack(row, include_fulltext: bool):
     return norm_key(" \n ".join(parts))
 
 def to_int_or_none(x):
-    try: return int(str(x).strip())
+    try:
+        return int(str(x).strip())
     except Exception:
         m = re.search(r"\d+", str(x))
         return int(m.group()) if m else None
 
 def order_by_template(values, template):
-    """1) テンプレの順 2) 未収載はアルファ順 3) その他は最後"""
+    """1) テンプレ順 2) 未収載はアルファ順 3) その他は最後"""
     vs = list(dict.fromkeys(values))
     tmpl_set = set(template)
     head = [v for v in template if v in vs and "その他" not in v]
@@ -154,10 +140,9 @@ def make_row_id(row):
 # -------------------- データ読み込み --------------------
 st.title("醸造協会誌　論文検索")
 
-from pathlib import Path
-
-DEMO_CSV_PATH = Path("data/keywords_summary4.csv")  # リポに同梱したテストCSV
-SECRET_URL = st.secrets.get("GSHEET_CSV_URL", "")  # （任意）Secretsに入れておけば自動使用
+DEMO_CSV_PATH = Path("data/keywords_summary4.csv")    # リポに同梱想定
+AUTHORS_CSV_PATH = Path("data/authors_readings.csv")  # ここから author 候補をロード
+SECRET_URL = st.secrets.get("GSHEET_CSV_URL", "")     # （任意）Secretsに入れておけば自動使用
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_local_csv(path: Path) -> pd.DataFrame:
@@ -167,24 +152,37 @@ def load_local_csv(path: Path) -> pd.DataFrame:
 def load_url_csv(url: str) -> pd.DataFrame:
     return ensure_cols(fetch_csv(url))
 
+@st.cache_data(ttl=600, show_spinner=False)
+def load_authors_csv(path: Path) -> pd.DataFrame | None:
+    if not path.exists():
+        return None
+    try:
+        df_a = pd.read_csv(path, encoding="utf-8")
+        df_a.columns = [str(c).strip() for c in df_a.columns]
+        if "author" not in df_a.columns:
+            return None
+        # 並びは reading → author の順でソート（reading があれば使う）
+        if "reading" in df_a.columns:
+            df_a = df_a.sort_values(["reading", "author"], na_position="last")
+        else:
+            df_a = df_a.sort_values(["author"])
+        return df_a[["author"]].dropna().drop_duplicates()
+    except Exception:
+        return None
+
 with st.sidebar:
     st.header("データ読み込み")
     st.caption("※ まずはデモ用CSVを自動ロード。URL/ファイル指定で上書きできます。")
 
-    # デモ自動ロードのON/OFF（デフォルトON）
-    use_demo = st.toggle("デモCSVを自動ロードする", value=True, help="data/demo.csv を読み込みます。")
+    use_demo = st.toggle("デモCSVを自動ロードする", value=True, help="data/keywords_summary4.csv を読み込みます。")
 
-    # 上書き手段：URL or ファイル
     url = st.text_input("公開CSVのURL（Googleスプレッドシート output=csv）", value=SECRET_URL)
     up  = st.file_uploader("CSVをローカルから読み込み", type=["csv"])
 
-    # 明示ボタン：読み込み（URL/ファイルの優先度は「アップロード > URL」）
     load_clicked = st.button("読み込み（URL/ファイルを優先）", type="primary", key="load_btn")
 
-# 優先順位: 1) クリックでURL/ファイル 2) デモ自動 3) 最後の手段：待機
 df = None
 err = None
-
 try:
     if load_clicked:
         if up is not None:
@@ -234,13 +232,30 @@ with c_i:
 # -------------------- 著者・対象物・研究タイプフィルタ --------------------
 st.subheader("検索フィルタ")
 c_a, c_tg, c_tp = st.columns([1.2, 1.2, 1.2])
+
+# --- 著者（オートコンプリート化：authors_readings.csv の author 列を使用） ---
 with c_a:
-    authors_all = build_author_candidates(df)
-    authors_sel = st.multiselect("著者", authors_all, default=[])
+    authors_df = load_authors_csv(AUTHORS_CSV_PATH)
+    if authors_df is not None and "author" in authors_df.columns:
+        authors_all = authors_df["author"].astype(str).tolist()
+    else:
+        # フォールバック：論文CSVから従来通り生成
+        authors_all = build_author_candidates_from_df(df)
+
+    authors_sel = st.multiselect(
+        "著者（オートコンプリート）",
+        options=authors_all,
+        default=[],
+        placeholder="著者名を入力してください"
+    )
+
+# --- 対象物 ---
 with c_tg:
     raw_targets = {t for v in df.get("対象物_top3", pd.Series(dtype=str)).fillna("") for t in split_multi(v)}
     targets_all = order_by_template(list(raw_targets), TARGET_ORDER)
     targets_sel = st.multiselect("対象物（複数選択／部分一致）", targets_all, default=[])
+
+# --- 研究タイプ ---
 with c_tp:
     raw_types = {t for v in df.get("研究タイプ_top3", pd.Series(dtype=str)).fillna("") for t in split_multi(v)}
     types_all = order_by_template(list(raw_types), TYPE_ORDER)
@@ -258,23 +273,37 @@ with c_kw3:
 # -------------------- フィルタ適用 --------------------
 def apply_filters(_df: pd.DataFrame) -> pd.DataFrame:
     df2 = _df.copy()
+
+    # 発行年
     if "発行年" in df2.columns:
         y = pd.to_numeric(df2["発行年"], errors="coerce")
         df2 = df2[(y >= y_from) & (y <= y_to) | y.isna()]
+
+    # 巻
     if vols_sel and "巻数" in df2.columns:
         df2 = df2[df2["巻数"].map(to_int_or_none).isin(set(vols_sel))]
+
+    # 号
     if issues_sel and "号数" in df2.columns:
         df2 = df2[df2["号数"].map(to_int_or_none).isin(set(issues_sel))]
+
+    # 著者（選択があれば、論文CSVの「著者」列に対してマッチさせる）
     if authors_sel and "著者" in df2.columns:
         sel = {norm_key(a) for a in authors_sel}
         def hit_author(v): return any(norm_key(x) in sel for x in split_authors(v))
         df2 = df2[df2["著者"].apply(hit_author)]
+
+    # 対象物（部分一致：top3列を使用）
     if targets_sel and "対象物_top3" in df2.columns:
         t_norm = [norm_key(t) for t in targets_sel]
         df2 = df2[df2["対象物_top3"].apply(lambda v: any(t in norm_key(v) for t in t_norm))]
+
+    # 研究タイプ（部分一致：top3列を使用）
     if types_sel and "研究タイプ_top3" in df2.columns:
         t_norm = [norm_key(t) for t in types_sel]
         df2 = df2[df2["研究タイプ_top3"].apply(lambda v: any(t in norm_key(v) for t in t_norm))]
+
+    # キーワード（タイトル・著者・file_name・キーワード列群 [+ 任意で pdf_text]）
     toks = tokens_from_query(kw_query)
     if toks:
         def hit_kw(row):
@@ -375,7 +404,7 @@ if not fav_disp.empty:
             use_container_width=True,
             hide_index=True,
             column_config=fav_column_config,
-            disabled=[c for c in fav_display_order if c not in ["★", "tags"]],  # ← tags を編集可に
+            disabled=[c for c in fav_display_order if c not in ["★", "tags"]],
             height=420,
             num_rows="fixed",
         )
@@ -387,7 +416,7 @@ if not fav_disp.empty:
         fav_checked_subset = set(fav_edited.loc[fav_edited["★"] == True, "_row_id"].tolist())
         st.session_state.favs = (st.session_state.favs - subset_ids_fav) | fav_checked_subset
 
-        # tags の更新（行ごとにテキストをパース → set に格納）
+        # tags の更新
         def parse_tags(s):
             if not isinstance(s, str): s = str(s or "")
             parts = [t.strip() for t in re.split(r"[ ,，、；;　]+", s) if t.strip()]
@@ -398,7 +427,6 @@ if not fav_disp.empty:
             if tag_set:
                 st.session_state.fav_tags[rid] = tag_set
             elif rid in st.session_state.fav_tags:
-                # 空にした場合は削除
                 del st.session_state.fav_tags[rid]
 
         st.success("お気に入り（★/tags）を反映しました")
@@ -420,13 +448,13 @@ with st.expander("🔎 タグでお気に入りを絞り込み（AND/OR）", exp
             return all(t in row_tags for t in tags) if tag_mode == "AND" else any(t in row_tags for t in tags)
         fav_disp_for_filter = fav_disp_for_filter[fav_disp_for_filter.apply(match_tags_row, axis=1)]
 
-    # 表示
     def tags_str_for_filter(rid: str) -> str:
         s = st.session_state.fav_tags.get(rid, set())
         return ", ".join(sorted(s)) if s else ""
+
     fav_disp_for_filter["tags"] = fav_disp_for_filter["_row_id"].apply(tags_str_for_filter)
 
-    show_cols = ["No.","発行年","巻数","号数","論文タイトル","著者","対象物_top3","研究タイプ","HPリンク先","PDFリンク先","tags"]
+    show_cols = ["No.","発行年","巻数","号数","論文タイトル","著者","対象物_top3","研究タイプ_top3","HPリンク先","PDFリンク先","tags"]
     show_cols = [c for c in show_cols if c in fav_disp_for_filter.columns]
     st.dataframe(fav_disp_for_filter[show_cols], use_container_width=True, hide_index=True)
 
@@ -441,16 +469,13 @@ filtered_export_df = disp.drop(columns=["★", "_row_id"], errors="ignore")
 
 # 2) お気に入りの出力（tags 列を付与）
 fav_export = fav_disp_full[fav_disp_full["_row_id"].isin(st.session_state.favs)].copy()
-
 def _tags_join(rid: str) -> str:
     s = st.session_state.fav_tags.get(rid, set())
     return ", ".join(sorted(s)) if s else ""
-
 fav_export["tags"] = fav_export["_row_id"].map(_tags_join)
 fav_export = fav_export.drop(columns=["_row_id"], errors="ignore")
 
 c_dl1, c_dl2 = st.columns(2)
-
 with c_dl1:
     st.download_button(
         "📥 絞り込み結果をCSV出力（表示列のみ）",
@@ -459,7 +484,6 @@ with c_dl1:
         mime="text/csv",
         use_container_width=True
     )
-
 with c_dl2:
     st.download_button(
         "⭐ お気に入りをCSV出力（tags付き）",
