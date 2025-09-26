@@ -343,6 +343,13 @@ st.markdown("### 検索結果")
 st.caption(f"{len(filtered)} / {len(df)} 件")
 
 visible_cols = make_visible_cols(filtered)
+
+# ★ ここで summary の位置を調整（著者の右に挿入）
+if "著者" in visible_cols and "summary" in filtered.columns:
+    idx = visible_cols.index("著者")
+    if "summary" not in visible_cols:
+        visible_cols.insert(idx + 1, "summary")
+
 disp = filtered.loc[:, visible_cols].copy()
 disp["_row_id"] = disp.apply(make_row_id, axis=1)
 
@@ -397,6 +404,14 @@ with c2:
 
 # お気に入り一覧（フィルタ無視で全体から）＋ tags 列（編集可）
 visible_cols_full = make_visible_cols(df)
+
+# ★ こちらも同じように summary を著者の右へ
+if "著者" in visible_cols_full and "summary" in df.columns:
+    idx = visible_cols_full.index("著者")
+    if "summary" not in visible_cols_full:
+        visible_cols_full.insert(idx + 1, "summary")
+
+fav_disp_full = df.loc[:, visible_cols_full].copy()
 fav_disp_full = df.loc[:, visible_cols_full].copy()
 fav_disp_full["_row_id"] = fav_disp_full.apply(make_row_id, axis=1)
 fav_disp = fav_disp_full[fav_disp_full["_row_id"].isin(st.session_state.favs)].copy()
