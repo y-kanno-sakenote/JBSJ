@@ -15,7 +15,6 @@ import io, re, time
 import pandas as pd
 import requests
 import streamlit as st
-from pathlib import Path
 
 # -------------------- ページ設定 --------------------
 st.set_page_config(page_title="論文検索（統一UI版）", layout="wide")
@@ -149,38 +148,10 @@ def make_row_id(row):
     yr  = str(row.get("発行年", "")).strip()
     return f"T:{ttl}|Y:{yr}"
 
-# ========== ここから：著者オートコンプリート（authors_readings.csv）追加 ==========
-AUTHORS_CSV_PATH = Path("data/authors_readings.csv")  # 別途作成したファイル（author, reading）
-
-@st.cache_data(ttl=600, show_spinner=False)
-def load_authors_readings(path: Path) -> pd.DataFrame:
-    if not path.exists():
-        # 見つからない場合は空のDFを返す（既存UIを壊さないため）
-        return pd.DataFrame(columns=["author", "reading"])
-    df = pd.read_csv(path, encoding="utf-8")
-    df.columns = [str(c).strip() for c in df.columns]
-    # 必須列が無ければ空扱い
-    if not {"author", "reading"}.issubset(df.columns):
-        return pd.DataFrame(columns=["author", "reading"])
-
-    # 読みをひらがな正規化（カタカナが混じってもOKにする）
-    def kata2hira(s: str) -> str:
-        out = []
-        for ch in str(s or ""):
-            code = ord(ch)
-            # カタカナ → ひらがな（U+30A1..U+30F3）
-            if 0x30A1 <= code <= 0x30F4:
-                out.append(chr(code - 0x60))
-            else:
-                out.append(ch)
-        return "".join(out)
-    df["reading_norm"] = df["reading"].astype(str).map(kata2hira).str.replace(r"\s+", "", regex=True)
-    df["author"] = df["author"].astype(str).str.strip()
-    return df[["author", "reading_norm"]].rename(columns={"reading_norm": "reading"})
-# ==============================================================================
-
 # -------------------- データ読み込み --------------------
 st.title("醸造協会誌　論文検索")
+
+from pathlib import Path
 
 DEMO_CSV_PATH = Path("data/keywords_summary4.csv")  # リポに同梱したテストCSV
 SECRET_URL = st.secrets.get("GSHEET_CSV_URL", "")  # （任意）Secretsに入れておけば自動使用
@@ -192,6 +163,26 @@ def load_local_csv(path: Path) -> pd.DataFrame:
 @st.cache_data(ttl=600, show_spinner=False)
 def load_url_csv(url: str) -> pd.DataFrame:
     return ensure_cols(fetch_csv(url))
+
+# === 追加: 著者読みCSVのローダ（authors_readings.csv） ===
+AUTHORS_CSV_PATH = Path("data/authors_readings.csv")
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_authors_readings(path: Path) -> pd.DataFrame | None:
+    try:
+        df_a = pd.read_csv(path, encoding="utf-8")
+        df_a.columns = [str(c).strip() for c in df_a.columns]
+        if not {"author", "reading"}.issubset(set(df_a.columns)):
+            return None
+        df_a["author"]  = df_a["author"].astype(str).str.strip()
+        df_a["reading"] = df_a["reading"].astype(str).str.strip()
+        df_a = df_a[(df_a["author"]!="") & (df_a["reading"]!="")]
+        # 重複 reading は author 優先でユニーク化
+        df_a = df_a.drop_duplicates(subset=["reading"], keep="first")
+        return df_a
+    except Exception:
+        return None
+# === 追加ここまで ===
 
 with st.sidebar:
     st.header("データ読み込み")
@@ -261,46 +252,27 @@ with c_i:
 st.subheader("検索フィルタ")
 c_a, c_tg, c_tp = st.columns([1.2, 1.2, 1.2])
 
-# === 著者（オートコンプリート：ひらがな検索・漢字表示） ===
 with c_a:
-    # 論文CSVに実際に出現する著者（漢字表記）集合
-    authors_in_df = set()
-    for v in df.get("著者", pd.Series(dtype=str)).fillna(""):
-        authors_in_df.update(split_authors(v))
-
-    # authors_readings.csv 読み込み（author, reading）
-    ar = load_authors_readings(AUTHORS_CSV_PATH)
-    # 論文CSVに出ない著者は候補除外
-    if not ar.empty:
-        ar = ar[ar["author"].isin(authors_in_df)].drop_duplicates(subset=["author"])
-
-    # ひらがな検索用の入力
-    def kata2hira(s: str) -> str:
-        out = []
-        for ch in str(s or ""):
-            code = ord(ch)
-            if 0x30A1 <= code <= 0x30F4:  # カタカナ→ひらがな
-                out.append(chr(code - 0x60))
-            else:
-                out.append(ch)
-        return "".join(out)
-
-    hira_query = st.text_input("著者（ひらがなで検索）", value="", placeholder="例: やまだ / さとう（空欄=全件）")
-    hira_norm = kata2hira(hira_query).replace(" ", "").replace("　", "")
-
-    if not ar.empty:
-        if hira_norm:
-            mask = ar["reading"].astype(str).str.contains(hira_norm, na=False)
-            author_options = sorted(ar.loc[mask, "author"].unique().tolist())
-        else:
-            author_options = sorted(ar["author"].unique().tolist())
+    # === ここだけ置き換え：著者オートコンプリート（読みで検索・表示は漢字） ===
+    adf = load_authors_readings(AUTHORS_CSV_PATH)
+    if adf is not None:
+        reading2author = dict(zip(adf["reading"], adf["author"]))
+        options_readings = sorted(reading2author.keys())
+        # 検索は options（=reading）に対して行われるので、表示に reading も含める
+        authors_sel_readings = st.multiselect(
+            "著者（読みで検索可 / 表示は漢字＋読み）",
+            options=options_readings,
+            format_func=lambda r: f"{reading2author.get(r, r)}｜{r}",
+            placeholder="例：やまだ / さとう / たかはし ..."
+        )
+        # 後段のフィルタは従来通り「著者（漢字）」で行いたいので、変換して authors_sel に入れる
+        authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
     else:
-        # authors_readings.csv が無い場合は従来方式（CSVの著者列から）
-        author_options = sorted(authors_in_df)
+        # フォールバック：従来の著者 multiselect
+        authors_all = build_author_candidates(df)
+        authors_sel = st.multiselect("著者", authors_all, default=[])
+    # === 置き換えここまで ===
 
-    authors_sel = st.multiselect("著者", author_options, default=[])
-
-# === 対象物 / 研究タイプ ===
 with c_tg:
     raw_targets = {t for v in df.get("対象物_top3", pd.Series(dtype=str)).fillna("") for t in split_multi(v)}
     targets_all = order_by_template(list(raw_targets), TARGET_ORDER)
