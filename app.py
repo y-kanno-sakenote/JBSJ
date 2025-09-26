@@ -452,42 +452,46 @@ with c_a:
                 return bool(h and h in allowed)
             cand = cand[cand["reading"].apply(in_row)]
 
-        # 並び順: ひらがな行順 → カタカナ → 英字
-        AIUEO_ORDER = "あいうえおかきくけこさしすせそたちつてとなにぬねの" \
-                      "はひふへほまみむめもやゆよらりるれろわをん"
+        # ===== 並べ替え: ひらがな → カタカナ → 英字 → その他 =====
+        # ひらがな・カタカナ・英字の判定
+        _re_hira = re.compile(r"^[\u3040-\u309F]")   # ひらがな
+        _re_kata = re.compile(r"^[\u30A0-\u30FF]")   # カタカナ
+        _re_roman = re.compile(r"^[A-Za-z]")         # 英字
 
-        def sort_tuple(row):
-            r = str(row["reading"])
-            if not r:
-                return (3, 999, r)
+        # カタカナ→ひらがな（比較用）
+        def kata_to_hira(s: str) -> str:
+            out = []
+            for ch in str(s or ""):
+                code = ord(ch)
+                if 0x30A1 <= code <= 0x30F6:  # ァ..ヶ
+                    out.append(chr(code - 0x60))
+                else:
+                    out.append(ch)
+            return "".join(out)
 
-            # カタカナをひらがなに変換して判定
-            hira = kata_to_hira(r)
-            ch = hira[0]
+        # 並べ替えキーを作る
+        # group: 0=ひらがな, 1=カタカナ, 2=英字, 3=その他
+        def sort_key(reading: str):
+            r = str(reading or "")
+            if _re_hira.match(r):
+                # ひらがなはそのまま
+                return (0, r)
+            if _re_kata.match(r):
+                # カタカナは ひらがな化して比較（グループはカタカナとして 1）
+                return (1, kata_to_hira(r))
+            if _re_roman.match(r):
+                # 英字は最後の手前
+                return (2, r.lower())
+            # 記号などは最後
+            return (3, r)
 
-            # 英字
-            if re.match(r"[A-Za-z]", r[0]):
-                return (2, 999, r.lower())
-
-            # ひらがな → 五十音順
-            idx = AIUEO_ORDER.find(ch)
-            if idx != -1:
-                return (0, idx, r)
-
-            # カタカナ（ひらがな変換できなかった場合）
-            if re.match(r"[\u30A0-\u30FF]", r[0]):
-                return (1, 999, r)
-
-            return (3, 998, r)  # その他
-
-        _tmp = cand.apply(
-            lambda row: pd.Series(sort_tuple(row), index=["_grp", "_key", "_sub"]),
-            axis=1
-        )
-        cand = pd.concat([cand.reset_index(drop=True), _tmp], axis=1) \
-                 .sort_values(by=["_grp", "_key", "_sub"], kind="mergesort") \
-                 .drop(columns=["_grp", "_key", "_sub"]) \
-                 .reset_index(drop=True)
+        # cand を「グループ→読みの比較キー」で安定ソート
+        cand = cand.assign(
+            __sort_grp=cand["reading"].map(lambda s: sort_key(s)[0]),
+            __sort_key=cand["reading"].map(lambda s: sort_key(s)[1]),
+        ).sort_values(
+            by=["__sort_grp", "__sort_key"], kind="mergesort"
+        ).drop(columns=["__sort_grp", "__sort_key"]).reset_index(drop=True)
 
         # multiselect の options は reading、表示は「漢字｜読み」
         reading2author = dict(zip(cand["reading"], cand["author"]))
