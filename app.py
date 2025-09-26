@@ -1,21 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-論文検索（統一UI版：お気に入りにタグを“表で直接入力”）
-
-機能:
-- 発行年レンジ、巻・号（複数選択）、著者（正規化・複数選択）、対象物/研究タイプ（部分一致・複数選択）
-- キーワード AND/OR 検索（空白/カンマ区切り、pdf_text を含めるか選択可能）
-- 検索結果テーブル（不要列の非表示、HP/PDF のリンク化、★でお気に入り）
-- お気に入り一覧（常設・★で解除/追加）
-- お気に入りタグ付け：お気に入り表の「tags」列を直接編集（カンマ/空白区切り）
-- 「❌ 全て外す」ボタンでお気に入り一括解除
-"""
-
-import io, re, time
-import pandas as pd
-import requests
-import streamlit as st
-from pathlib import Path
 # === 入力欄のコントラスト調整 CSS ===
 st.markdown(
     """
@@ -51,6 +33,26 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
+# -*- coding: utf-8 -*-
+"""
+論文検索（統一UI版：お気に入りにタグを“表で直接入力”）
+
+機能:
+- 発行年レンジ、巻・号（複数選択）、著者（正規化・複数選択）、対象物/研究タイプ（部分一致・複数選択）
+- キーワード AND/OR 検索（空白/カンマ区切り、pdf_text を含めるか選択可能）
+- 検索結果テーブル（不要列の非表示、HP/PDF のリンク化、★でお気に入り）
+- お気に入り一覧（常設・★で解除/追加）
+- お気に入りタグ付け：お気に入り表の「tags」列を直接編集（カンマ/空白区切り）
+- 「❌ 全て外す」ボタンでお気に入り一括解除
+"""
+
+import io, re, time
+import pandas as pd
+import requests
+import streamlit as st
+from pathlib import Path
+
 # -------------------- ページ設定 --------------------
 st.set_page_config(page_title="論文検索（統一UI版）", layout="wide")
 
