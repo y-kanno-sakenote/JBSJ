@@ -398,31 +398,27 @@ with c_a:
     # authors_readings.csv を読み込み（ひらがな検索＆表示は漢字）
     adf = load_authors_readings(AUTHORS_CSV_PATH)
     if adf is not None and not adf.empty:
-        # 英字判定：読みが A〜Z 始まり（ローマ字/英名を末尾に回す用）
+                # 表示順：ひらがな→カタカナ→英字（英字は最後）
         def is_roman(hira: str) -> bool:
             return bool(re.match(r"[A-Za-z]", str(hira or "")))
 
-        # イニシャルで候補を絞る
-        ini = st.session_state.author_initial
-        if ini == "英字":
-            cand = adf[adf["reading"].str.match(r"[A-Za-z]", na=False)].copy()
-        else:
-            # ひらがな先頭が該当行
-            cand = adf[adf["reading"].str.startswith(ini, na=False)].copy()
+        def is_katakana(s: str) -> bool:
+            return bool(re.match(r"[\u30A0-\u30FF]", str(s or "")))
 
-        # 表示順：ひらがな→カタカナ→英字（英字は最後）
-        def sort_key(row):
+        # 並べ替え用の補助列を作成（タプルを2列に分解）
+        def sort_tuple(row):
             r = str(row["reading"])
-            # 英字は末尾へ
             if is_roman(r):
-                return (2, r.lower())
-            # カタカナ先頭は中間
-            if re.match(r"[\u30A0-\u30FF]", r):
-                return (1, jaconv.kata2hira(r))
-            # ひらがなは先頭
-            return (0, r)
+                return (2, r.lower())  # 英字は最後
+            if is_katakana(r):
+                return (1, r)          # カタカナは中間
+            return (0, r)              # ひらがなは先頭
 
-        cand = cand.sort_values(key=lambda s: s.index.map(lambda i: sort_key(cand.loc[i])))
+        _tmp = cand.apply(lambda r: pd.Series(sort_tuple(r), index=["_grp", "_key"]), axis=1)
+        cand = pd.concat([cand.reset_index(drop=True), _tmp], axis=1) \
+                 .sort_values(by=["_grp", "_key"], kind="mergesort") \
+                 .drop(columns=["_grp", "_key"]) \
+                 .reset_index(drop=True)
 
         # multiselect の options は reading、表示は「漢字｜読み」
         reading2author = dict(zip(cand["reading"], cand["author"]))
