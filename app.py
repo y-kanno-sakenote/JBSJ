@@ -384,15 +384,15 @@ with row2_radio:
     initials = ["すべて","あ","か","さ","た","な","は","ま","や","ら","わ","英字"]
     if "author_initial" not in st.session_state:
         st.session_state.author_initial = "すべて"
-    selected_initial = st.radio(
-        "著者イニシャル選択",
-        initials,
-        horizontal=True,   # ← 横一列に並べる
-        index=initials.index(st.session_state.author_initial) if st.session_state.author_initial in initials else 0,
-        key="author_initial_radio",
-    )
-    st.session_state.author_initial = selected_initial
+    st.radio(
+    "著者イニシャル選択",
+    options=initials,
+    horizontal=True,
+    key="author_initial",   # ← これが唯一のソースオブトゥルース
+)
 
+# 以降は session_state から読むだけ（代入しない）
+ini = st.session_state["author_initial"]
 # authors_readings.csv を読み込み
 with row2_author:
     adf = load_authors_readings(AUTHORS_CSV_PATH)
