@@ -382,22 +382,23 @@ with c_tp:
     types_all = order_by_template(list(raw_types), TYPE_ORDER)
     types_sel = st.multiselect("研究タイプ（複数選択／部分一致）", types_all, default=[])
 
-# --- 著者（あかさたなラジオ → オートコンプリート）---
+# --- 著者（あかさたなラジオ → オートコンプリート：見た目は入力欄が上、ラジオが下）---
 with c_a:
     st.caption("著者の読み頭文字でサジェストを絞り込み")
 
     initials = ["すべて","あ","か","さ","た","な","は","ま","や","ら","わ","英字"]
-
-    # 既定値を一度だけセット（以後は radio の key 管理に任せる）
     if "author_initial" not in st.session_state:
         st.session_state.author_initial = "すべて"
 
-    # index は指定しない（key があれば state を自動採用）
+    # ここに“入力欄”を置くためのプレースホルダを先に作る（視覚的に上に来る）
+    author_input_placeholder = st.container()
+
+    # ↓ ラジオは下側に表示（ここで選択値を確定）
     sel_ini = st.radio(
         "著者イニシャル選択",
         options=initials,
         horizontal=True,
-        key="author_initial",
+        key="author_initial",   # 既存 state をそのまま利用
     )
 
     # authors_readings.csv を読み込み
@@ -405,6 +406,7 @@ with c_a:
     if adf is not None and not adf.empty:
         cand = adf.copy()
 
+        # 五十音行（濁点・半濁点含む）
         GOJUON = {
             "あ": "あいうえお",
             "か": "かきくけこがぎぐげご",
@@ -460,19 +462,23 @@ with c_a:
         ).sort_values(by=["__g","__k"], kind="mergesort") \
          .drop(columns=["__g","__k"]).reset_index(drop=True)
 
+        # === 上で作ったプレースホルダに“入力欄”を描画（見た目はラジオより上に出る） ===
         reading2author = dict(zip(cand["reading"], cand["author"]))
         options_readings = list(reading2author.keys())
-
-        authors_sel_readings = st.multiselect(
-            "著者（読みで検索可 / 表示は漢字＋読み）",
-            options=options_readings,
-            format_func=lambda r: f"{reading2author.get(r, r)}｜{r}",
-            placeholder="例：やまだ / さとう / たかはし ..."
-        )
+        with author_input_placeholder:
+            authors_sel_readings = st.multiselect(
+                "著者（読みで検索可 / 表示は漢字＋読み）",
+                options=options_readings,
+                format_func=lambda r: f"{reading2author.get(r, r)}｜{r}",
+                placeholder="例：やまだ / さとう / たかはし ..."
+            )
+        # 後段フィルタ用に漢字へ変換
         authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
     else:
-        authors_all = build_author_candidates(df)
-        authors_sel = st.multiselect("著者", authors_all, default=[])
+        # フォールバック
+        with author_input_placeholder:
+            authors_all = build_author_candidates(df)
+            authors_sel = st.multiselect("著者", authors_all, default=[])
 
 # --- 未定義ガード ---
 if 'authors_sel' not in locals(): authors_sel = []
