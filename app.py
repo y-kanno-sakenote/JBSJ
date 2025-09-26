@@ -361,48 +361,28 @@ with c_v:
 with c_i:
     iss_candidates = sorted({v for v in (df.get("号数", pd.Series(dtype=str)).map(to_int_or_none)).dropna().unique()})
     issues_sel = st.multiselect("号（複数選択）", iss_candidates, default=[])
-# -------------------- 著者・対象物・研究タイプフィルタ --------------------
-st.subheader("検索フィルタ")
-
-# 3列（対象物 / 研究タイプ / 著者）
-c_tg, c_tp, c_a = st.columns([1.2, 1.2, 1.2])
-
-# --- 対象物（top3から候補生成）---
-with c_tg:
-    raw_targets = {t for v in df.get("対象物_top3", pd.Series(dtype=str)).fillna("")
-                   for t in split_multi(v)}
-    targets_all = order_by_template(list(raw_targets), TARGET_ORDER)
-    targets_sel = st.multiselect("対象物（複数選択／部分一致）", targets_all, default=[])
-
-# --- 研究タイプ（top3から候補生成）---
-with c_tp:
-    raw_types = {t for v in df.get("研究タイプ_top3", pd.Series(dtype=str)).fillna("")
-                 for t in split_multi(v)}
-    types_all = order_by_template(list(raw_types), TYPE_ORDER)
-    types_sel = st.multiselect("研究タイプ（複数選択／部分一致）", types_all, default=[])
-
-# --- 著者（あかさたなボタン → オートコンプリート）---
+# --- 著者（あかさたなラジオボタン → オートコンプリート）---
 with c_a:
     st.caption("著者の読み頭文字でサジェストを絞り込み")
     initials = ["あ","か","さ","た","な","は","ま","や","ら","わ","英字"]
 
-    if "author_initial" not in st.session_state:
-        st.session_state.author_initial = "あ"
-
-    # 横並びの小ボタン
-    btn_cols = st.columns(len(initials))
-    for i, ini in enumerate(initials):
-        if btn_cols[i].button(ini, key=f"ini_{ini}", use_container_width=True):
-            st.session_state.author_initial = ini
+    # ラジオボタン（横並び）
+    author_initial = st.radio(
+        "頭文字を選択",
+        initials,
+        index=0,
+        horizontal=True,
+        key="author_initial_radio"
+    )
 
     # authors_readings.csv を読み込み
     adf = load_authors_readings(AUTHORS_CSV_PATH)
     if adf is not None and not adf.empty:
         # イニシャルフィルタ
-        if st.session_state.author_initial == "英字":
+        if author_initial == "英字":
             mask = adf["reading"].str.match(r"[A-Za-z]", na=False)
         else:
-            mask = adf["reading"].astype(str).str.startswith(st.session_state.author_initial)
+            mask = adf["reading"].astype(str).str.startswith(author_initial)
         cand = adf.loc[mask, ["reading", "author"]].dropna().copy()
 
         # 並べ替え（ひらがな→カタカナ→英字）
