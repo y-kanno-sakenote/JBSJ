@@ -15,6 +15,7 @@ import io, re, time
 import pandas as pd
 import requests
 import streamlit as st
+from pathlib import Path
 
 # -------------------- ページ設定 --------------------
 st.set_page_config(page_title="論文検索（統一UI版）", layout="wide")
@@ -106,7 +107,6 @@ def haystack(row, include_fulltext: bool):
         str(row.get("論文タイトル","")),
         str(row.get("著者","")),
         str(row.get("file_name","")),
-        str(row.get("summary","")),   # ← 要約も検索対象に追加
         " ".join(str(row.get(c,"")) for c in KEY_COLS if c in row),
     ]
     if include_fulltext and "pdf_text" in row:
@@ -149,14 +149,41 @@ def make_row_id(row):
     yr  = str(row.get("発行年", "")).strip()
     return f"T:{ttl}|Y:{yr}"
 
+# ========== ここから：著者オートコンプリート（authors_readings.csv）追加 ==========
+AUTHORS_CSV_PATH = Path("data/authors_readings.csv")  # 別途作成したファイル（author, reading）
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_authors_readings(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        # 見つからない場合は空のDFを返す（既存UIを壊さないため）
+        return pd.DataFrame(columns=["author", "reading"])
+    df = pd.read_csv(path, encoding="utf-8")
+    df.columns = [str(c).strip() for c in df.columns]
+    # 必須列が無ければ空扱い
+    if not {"author", "reading"}.issubset(df.columns):
+        return pd.DataFrame(columns=["author", "reading"])
+
+    # 読みをひらがな正規化（カタカナが混じってもOKにする）
+    def kata2hira(s: str) -> str:
+        out = []
+        for ch in str(s or ""):
+            code = ord(ch)
+            # カタカナ → ひらがな（U+30A1..U+30F3）
+            if 0x30A1 <= code <= 0x30F4:
+                out.append(chr(code - 0x60))
+            else:
+                out.append(ch)
+        return "".join(out)
+    df["reading_norm"] = df["reading"].astype(str).map(kata2hira).str.replace(r"\s+", "", regex=True)
+    df["author"] = df["author"].astype(str).str.strip()
+    return df[["author", "reading_norm"]].rename(columns={"reading_norm": "reading"})
+# ==============================================================================
+
 # -------------------- データ読み込み --------------------
 st.title("醸造協会誌　論文検索")
 
-from pathlib import Path
-
-DEMO_CSV_PATH = Path("data/keywords_summary4.csv")   # リポに同梱したメインCSV
-SUM_CSV_PATH  = Path("data/summaries.csv")           # ← 要約CSV（file_name, rel_path, summary）
-SECRET_URL = st.secrets.get("GSHEET_CSV_URL", "")    # （任意）Secretsに入れておけば自動使用
+DEMO_CSV_PATH = Path("data/keywords_summary4.csv")  # リポに同梱したテストCSV
+SECRET_URL = st.secrets.get("GSHEET_CSV_URL", "")  # （任意）Secretsに入れておけば自動使用
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_local_csv(path: Path) -> pd.DataFrame:
@@ -165,13 +192,6 @@ def load_local_csv(path: Path) -> pd.DataFrame:
 @st.cache_data(ttl=600, show_spinner=False)
 def load_url_csv(url: str) -> pd.DataFrame:
     return ensure_cols(fetch_csv(url))
-
-@st.cache_data(ttl=600, show_spinner=False)
-def load_summaries(path: Path) -> pd.DataFrame:
-    df = ensure_cols(pd.read_csv(path, encoding="utf-8"))
-    # 使うのは file_name / summary のみ
-    keep = [c for c in df.columns if c in {"file_name", "summary"}]
-    return df[keep]
 
 with st.sidebar:
     st.header("データ読み込み")
@@ -216,17 +236,6 @@ if df is None:
     st.info("左のサイドバーで CSV を指定するか、デモCSVを有効にしてください。")
     st.stop()
 
-# --- summaries.csv を自動マージ（存在すれば） ---
-if SUM_CSV_PATH.exists():
-    try:
-        df_sum = load_summaries(SUM_CSV_PATH)
-        if "file_name" in df.columns and "file_name" in df_sum.columns:
-            # file_name で左外部結合、summary を付与
-            df = df.merge(df_sum, on="file_name", how="left")
-            st.caption("🧪 summaries.csv をマージ済み（列: summary）")
-    except Exception as e:
-        st.warning(f"summary マージに失敗: {e}")
-
 # -------------------- 年・巻・号フィルタ --------------------
 st.subheader("年・巻・号フィルタ")
 year_vals = pd.to_numeric(df.get("発行年", pd.Series(dtype=str)), errors="coerce")
@@ -251,9 +260,47 @@ with c_i:
 # -------------------- 著者・対象物・研究タイプフィルタ --------------------
 st.subheader("検索フィルタ")
 c_a, c_tg, c_tp = st.columns([1.2, 1.2, 1.2])
+
+# === 著者（オートコンプリート：ひらがな検索・漢字表示） ===
 with c_a:
-    authors_all = build_author_candidates(df)
-    authors_sel = st.multiselect("著者", authors_all, default=[])
+    # 論文CSVに実際に出現する著者（漢字表記）集合
+    authors_in_df = set()
+    for v in df.get("著者", pd.Series(dtype=str)).fillna(""):
+        authors_in_df.update(split_authors(v))
+
+    # authors_readings.csv 読み込み（author, reading）
+    ar = load_authors_readings(AUTHORS_CSV_PATH)
+    # 論文CSVに出ない著者は候補除外
+    if not ar.empty:
+        ar = ar[ar["author"].isin(authors_in_df)].drop_duplicates(subset=["author"])
+
+    # ひらがな検索用の入力
+    def kata2hira(s: str) -> str:
+        out = []
+        for ch in str(s or ""):
+            code = ord(ch)
+            if 0x30A1 <= code <= 0x30F4:  # カタカナ→ひらがな
+                out.append(chr(code - 0x60))
+            else:
+                out.append(ch)
+        return "".join(out)
+
+    hira_query = st.text_input("著者（ひらがなで検索）", value="", placeholder="例: やまだ / さとう（空欄=全件）")
+    hira_norm = kata2hira(hira_query).replace(" ", "").replace("　", "")
+
+    if not ar.empty:
+        if hira_norm:
+            mask = ar["reading"].astype(str).str.contains(hira_norm, na=False)
+            author_options = sorted(ar.loc[mask, "author"].unique().tolist())
+        else:
+            author_options = sorted(ar["author"].unique().tolist())
+    else:
+        # authors_readings.csv が無い場合は従来方式（CSVの著者列から）
+        author_options = sorted(authors_in_df)
+
+    authors_sel = st.multiselect("著者", author_options, default=[])
+
+# === 対象物 / 研究タイプ ===
 with c_tg:
     raw_targets = {t for v in df.get("対象物_top3", pd.Series(dtype=str)).fillna("") for t in split_multi(v)}
     targets_all = order_by_template(list(raw_targets), TARGET_ORDER)
@@ -307,17 +354,6 @@ st.markdown("### 検索結果")
 st.caption(f"{len(filtered)} / {len(df)} 件")
 
 visible_cols = make_visible_cols(filtered)
-
-# ← summary列がある場合、タイトルの直後に差し込む（重複回避しつつ）
-if "summary" in filtered.columns:
-    if "summary" in visible_cols:
-        visible_cols.remove("summary")
-    try:
-        insert_at = visible_cols.index("論文タイトル") + 1
-    except ValueError:
-        insert_at = 0
-    visible_cols.insert(insert_at, "summary")
-
 disp = filtered.loc[:, visible_cols].copy()
 disp["_row_id"] = disp.apply(make_row_id, axis=1)
 
@@ -372,16 +408,6 @@ with c2:
 
 # お気に入り一覧（フィルタ無視で全体から）＋ tags 列（編集可）
 visible_cols_full = make_visible_cols(df)
-# お気に入り側も summary をタイトル直後へ
-if "summary" in df.columns:
-    if "summary" in visible_cols_full:
-        visible_cols_full.remove("summary")
-    try:
-        insert_at_full = visible_cols_full.index("論文タイトル") + 1
-    except ValueError:
-        insert_at_full = 0
-    visible_cols_full.insert(insert_at_full, "summary")
-
 fav_disp_full = df.loc[:, visible_cols_full].copy()
 fav_disp_full["_row_id"] = fav_disp_full.apply(make_row_id, axis=1)
 fav_disp = fav_disp_full[fav_disp_full["_row_id"].isin(st.session_state.favs)].copy()
@@ -445,7 +471,7 @@ else:
     st.info("お気に入りは未選択です。上の表の『★』にチェックしてから反映してください。")
     fav_edited = None
 
-# -------------------- タグでお気に入りを絞り込み（折り畳み） --------------------
+# -------------------- タグでお気に入りを絞り込み（AND/OR） --------------------
 with st.expander("🔎 タグでお気に入りを絞り込み（AND/OR）", expanded=False):
     tag_query = st.text_input("タグ検索（カンマ/空白区切り）", key="tag_query")
     tag_mode = st.radio("一致条件", ["OR", "AND"], index=0, horizontal=True, key="tag_mode")
@@ -464,7 +490,7 @@ with st.expander("🔎 タグでお気に入りを絞り込み（AND/OR）", exp
         return ", ".join(sorted(s)) if s else ""
     fav_disp_for_filter["tags"] = fav_disp_for_filter["_row_id"].apply(tags_str_for_filter)
 
-    show_cols = ["No.","発行年","巻数","号数","論文タイトル","著者","対象物_top3","研究タイプ","HPリンク先","PDFリンク先","tags","summary"]
+    show_cols = ["No.","発行年","巻数","号数","論文タイトル","著者","対象物_top3","研究タイプ","HPリンク先","PDFリンク先","tags"]
     show_cols = [c for c in show_cols if c in fav_disp_for_filter.columns]
     st.dataframe(fav_disp_for_filter[show_cols], use_container_width=True, hide_index=True)
 
