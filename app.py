@@ -381,7 +381,6 @@ with row1_tp:
 row2_author, row2_radio = st.columns([1.6, 1.2])
 
 with row2_author:
-    st.caption("著者の読みで検索（表示は漢字｜読み）")
 
 with row2_radio:
     initials = ["すべて","あ","か","さ","た","な","は","ま","や","ら","わ","英字"]
