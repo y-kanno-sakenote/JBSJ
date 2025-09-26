@@ -405,63 +405,53 @@ with c_tp:
     types_sel = st.multiselect("研究タイプ（複数選択／部分一致）", types_all, default=[])
 
 with c_a:
-    # 著者（読みで検索・表示は漢字＋読み） ※既存UIを壊さず置換
     adf = load_authors_readings(AUTHORS_CSV_PATH)
     if adf is not None and not adf.empty:
-        # 日本語→先 / カタカナ→後 / 英字→最後 の並びに
         def _author_kind(a: str) -> int:
-            if re.fullmatch(r"[A-Za-z .,'-]+", a or ""):  # 英字 → 2
+            if re.fullmatch(r"[A-Za-z .,'-]+", a or ""):
                 return 2
-            # カタカナ開始 → 1、その他（漢字/ひらがな）→ 0
             return 1 if a and (0x30A0 <= ord(a[0]) <= 0x30FF) else 0
 
         adf = adf.copy()
         adf["author"] = adf["author"].astype(str).str.strip()
         adf["reading"] = adf["reading"].astype(str).str.strip()
-        # オプション候補（並び替え）
         adf = adf.sort_values(by=["author"], key=lambda s: s.map(_author_kind)).drop_duplicates(subset=["reading"])
-
         reading2author = dict(zip(adf["reading"], adf["author"]))
 
-        # --- 五十音/英字 行ボタン（常時表示・折り畳みなし） ---
-        rows = ["すべて", "あ","か","さ","た","な","は","ま","や","ら","わ", "A–Z"]
-        col_btns = st.columns(len(rows))
-        # 現在の選択をセッションに保持
-        if "author_row_sel" not in st.session_state:
-            st.session_state.author_row_sel = "すべて"
-
-        for i, lab in enumerate(rows):
-            clicked = col_btns[i].button(lab, key=f"author_row_btn_{lab}")
-            if clicked:
-                st.session_state.author_row_sel = lab
-
-        # 行選択に応じて候補を絞る（options は reading のリスト）
-        if st.session_state.author_row_sel == "すべて":
-            options_readings = list(reading2author.keys())
-        elif st.session_state.author_row_sel == "A–Z":
-            # author が英字のものだけ
-            en_authors = {a for a in adf["author"].tolist() if re.fullmatch(r"[A-Za-z .,'-]+", a or "")}
-            options_readings = [r for r, a in reading2author.items() if a in en_authors]
-        else:
-            # 五十音行で絞り込み（reading の先頭かなで判定）
-            want = st.session_state.author_row_sel
-            options_readings = []
-            for r in reading2author.keys():
-                head = r[:1]
-                bucket = _kana_head_to_row(head)
-                if bucket == want:
-                    options_readings.append(r)
-
-        # 表示は「漢字｜読み」、検索は reading に対して
+        # --- まず multiselect 本体 ---
         authors_sel_readings = st.multiselect(
             "著者（読みで検索可 / 表示は漢字＋読み）",
-            options=sorted(options_readings),
+            options=sorted(reading2author.keys()),
             format_func=lambda r: f"{reading2author.get(r, r)}｜{r}",
             placeholder="例：やまだ / さとう / たかはし ..."
         )
         authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
+
+        # --- 次に五十音/英字ボタンを multiselect の下に並べる ---
+        rows = ["すべて", "あ","か","さ","た","な","は","ま","や","ら","わ","A–Z"]
+        col_btns = st.columns(len(rows))
+        if "author_row_sel" not in st.session_state:
+            st.session_state.author_row_sel = "すべて"
+        for i, lab in enumerate(rows):
+            if col_btns[i].button(lab, key=f"author_row_btn_{lab}"):
+                st.session_state.author_row_sel = lab
+
+        # 選択行に応じて候補を再構築（options を更新）
+        if st.session_state.author_row_sel == "すべて":
+            pass  # 全部
+        elif st.session_state.author_row_sel == "A–Z":
+            en_authors = {a for a in adf["author"].tolist() if re.fullmatch(r"[A-Za-z .,'-]+", a or "")}
+            options_readings = [r for r, a in reading2author.items() if a in en_authors]
+            st.info(f"A–Zで絞り込み候補数: {len(options_readings)}")
+        else:
+            want = st.session_state.author_row_sel
+            options_readings = []
+            for r in reading2author.keys():
+                head = r[:1]
+                if _kana_head_to_row(head) == want:
+                    options_readings.append(r)
+            st.info(f"{want}行で絞り込み候補数: {len(options_readings)}")
     else:
-        # フォールバック：従来の著者 multiselect
         authors_all = build_author_candidates(df)
         authors_sel = st.multiselect("著者", authors_all, default=[])
 
