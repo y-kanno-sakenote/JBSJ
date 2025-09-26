@@ -385,7 +385,7 @@ with c_tp:
 with c_a:
     st.caption("著者の読み頭文字でサジェストを絞り込み")
     initials = ["あ","か","さ","た","な","は","ま","や","ら","わ","英字"]
-    # セッション保持（未定義時の初期化）
+
     if "author_initial" not in st.session_state:
         st.session_state.author_initial = "あ"
 
@@ -395,32 +395,33 @@ with c_a:
         if btn_cols[i].button(ini, key=f"ini_{ini}", use_container_width=True):
             st.session_state.author_initial = ini
 
-    # authors_readings.csv を読み込み（ひらがな検索＆表示は漢字）
+    # authors_readings.csv を読み込み
     adf = load_authors_readings(AUTHORS_CSV_PATH)
     if adf is not None and not adf.empty:
-                # 表示順：ひらがな→カタカナ→英字（英字は最後）
+        # イニシャルフィルタ
+        if st.session_state.author_initial == "英字":
+            mask = adf["reading"].str.match(r"[A-Za-z]", na=False)
+        else:
+            mask = adf["reading"].astype(str).str.startswith(st.session_state.author_initial)
+        cand = adf.loc[mask, ["reading", "author"]].dropna().copy()
+
+        # 並べ替え（ひらがな→カタカナ→英字）
         def is_roman(hira: str) -> bool:
             return bool(re.match(r"[A-Za-z]", str(hira or "")))
-
         def is_katakana(s: str) -> bool:
             return bool(re.match(r"[\u30A0-\u30FF]", str(s or "")))
-
-        # 並べ替え用の補助列を作成（タプルを2列に分解）
         def sort_tuple(row):
             r = str(row["reading"])
-            if is_roman(r):
-                return (2, r.lower())  # 英字は最後
-            if is_katakana(r):
-                return (1, r)          # カタカナは中間
-            return (0, r)              # ひらがなは先頭
-
+            if is_roman(r): return (2, r.lower())
+            if is_katakana(r): return (1, r)
+            return (0, r)
         _tmp = cand.apply(lambda r: pd.Series(sort_tuple(r), index=["_grp", "_key"]), axis=1)
-        cand = pd.concat([cand.reset_index(drop=True), _tmp], axis=1) \
-                 .sort_values(by=["_grp", "_key"], kind="mergesort") \
-                 .drop(columns=["_grp", "_key"]) \
-                 .reset_index(drop=True)
+        cand = (pd.concat([cand.reset_index(drop=True), _tmp], axis=1)
+                  .sort_values(by=["_grp","_key"], kind="mergesort")
+                  .drop(columns=["_grp","_key"])
+                  .reset_index(drop=True))
 
-        # multiselect の options は reading、表示は「漢字｜読み」
+        # multiselect
         reading2author = dict(zip(cand["reading"], cand["author"]))
         options_readings = list(reading2author.keys())
         authors_sel_readings = st.multiselect(
@@ -429,25 +430,15 @@ with c_a:
             format_func=lambda r: f"{reading2author.get(r, r)}｜{r}",
             placeholder="例：やまだ / さとう / たかはし ..."
         )
-        # 後段のフィルタは従来通り「著者（漢字）」へ変換
         authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
     else:
-        # フォールバック：従来の著者リスト
         authors_all = build_author_candidates(df)
         authors_sel = st.multiselect("著者", authors_all, default=[])
 
-# --- 未定義ガード（apply_filters 実行前の保険）---
+# --- 未定義ガード ---
 if 'authors_sel' not in locals(): authors_sel = []
 if 'targets_sel' not in locals(): targets_sel = []
-if 'types_sel'   not in locals(): types_sel   = []
-
-# --- 著者・対象物・研究タイプフィルタ UI の直後あたりに追加 ---
-if 'authors_sel' not in locals():
-    authors_sel = []
-if 'targets_sel' not in locals():
-    targets_sel = []
-if 'types_sel' not in locals():
-    types_sel = []
+if 'types_sel' not in locals(): types_sel   = []
 
 # -------------------- キーワード検索 --------------------
 c_kw1, c_kw2 = st.columns([3, 1])
