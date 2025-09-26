@@ -361,47 +361,27 @@ with c_v:
 with c_i:
     iss_candidates = sorted({v for v in (df.get("号数", pd.Series(dtype=str)).map(to_int_or_none)).dropna().unique()})
     issues_sel = st.multiselect("号（複数選択）", iss_candidates, default=[])
-# -------------------- 著者・対象物・研究タイプフィルタ --------------------
-st.subheader("検索フィルタ")
-
-# 3列レイアウト（対象物 / 研究タイプ / 著者）
-c_tg, c_tp, c_a = st.columns([1.2, 1.2, 1.2])
-
-# --- 対象物 ---
-with c_tg:
-    raw_targets = {t for v in df.get("対象物_top3", pd.Series(dtype=str)).fillna("")
-                   for t in split_multi(v)}
-    targets_all = order_by_template(list(raw_targets), TARGET_ORDER)
-    targets_sel = st.multiselect("対象物（複数選択／部分一致）", targets_all, default=[])
-
-# --- 研究タイプ ---
-with c_tp:
-    raw_types = {t for v in df.get("研究タイプ_top3", pd.Series(dtype=str)).fillna("")
-                 for t in split_multi(v)}
-    types_all = order_by_template(list(raw_types), TYPE_ORDER)
-    types_sel = st.multiselect("研究タイプ（複数選択／部分一致）", types_all, default=[])
-
-# --- 著者 ---
 with c_a:
     st.caption("著者の読み頭文字でサジェストを絞り込み")
-    initials = ["あ","か","さ","た","な","は","ま","や","ら","わ","英字"]
+    initials = ["すべて","あ","か","さ","た","な","は","ま","や","ら","わ","英字"]
 
     # 横並びのラジオボタン
     author_initial = st.radio(
         "頭文字を選択",
         initials,
-        index=0,
+        index=0,  # デフォルトは「すべて」
         horizontal=True,
         key="author_initial_radio"
     )
 
     adf = load_authors_readings(AUTHORS_CSV_PATH)
     if adf is not None and not adf.empty:
-        if author_initial == "英字":
-            mask = adf["reading"].str.match(r"[A-Za-z]", na=False)
+        if author_initial == "すべて":
+            cand = adf.loc[:, ["reading","author"]].dropna().copy()
+        elif author_initial == "英字":
+            cand = adf.loc[adf["reading"].str.match(r"[A-Za-z]", na=False), ["reading","author"]].copy()
         else:
-            mask = adf["reading"].astype(str).str.startswith(author_initial)
-        cand = adf.loc[mask, ["reading","author"]].dropna().copy()
+            cand = adf.loc[adf["reading"].astype(str).str.startswith(author_initial), ["reading","author"]].copy()
 
         # 並び順調整（ひらがな→カタカナ→英字）
         def is_roman(s): return bool(re.match(r"[A-Za-z]", str(s or "")))
