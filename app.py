@@ -71,91 +71,47 @@ st.markdown(
       outline: none !important;
     }
 
-    /* ======== ドロップダウン（候補リスト）を“高く & 太いスクロール”に ======== */
-    ul[role="listbox"] {
+    /* ======== 著者ドロップダウン専用（候補リスト） ======== */
+    ul[role="listbox"][aria-label*="著者"] {
       background: #f5f5f5 !important;
       border: 1px solid #666 !important;
-      max-height: 70vh !important;     /* 画面の7割まで高く */
-      min-height: 360px !important;     /* 低解像度でも十分な高さを確保 */
+      max-height: 70vh !important;
       overflow-y: auto !important;
-      padding-right: 6px !important;    /* スクロールバーぶんの余白 */
-      scrollbar-width: auto;            /* Firefox: 太め */
-      scrollbar-color: #555 #e9e9e9;    /* Firefox: コントラスト強め */
+      padding-right: 6px !important;
+      scrollbar-width: auto;            
+      scrollbar-color: #555 #e9e9e9;    
     }
-    /* 候補1行を少し高く＝当たり判定を大きくして選びやすく */
-    li[role="option"] {
+    ul[role="listbox"][aria-label*="著者"] li[role="option"] {
       padding: 8px 12px !important;
       line-height: 1.4 !important;
       font-size: 0.95rem !important;
     }
-    li[role="option"]:hover,
-    li[role="option"][aria-selected="true"] {
+    ul[role="listbox"][aria-label*="著者"] li[role="option"]:hover,
+    ul[role="listbox"][aria-label*="著者"] li[role="option"][aria-selected="true"] {
       background: #e0e0e0 !important;
       color: #000 !important;
     }
 
-    /* WebKit 系（Chrome/Edge/Safari）のスクロールバーを太く＆高コントラストに */
-    ul[role="listbox"]::-webkit-scrollbar {
-      width: 16px;                      /* ← 太くする */
+    /* Chrome/Edge/Safari 用 丸スクロールバー */
+    ul[role="listbox"][aria-label*="著者"]::-webkit-scrollbar {
+      width: 16px;
     }
-    ul[role="listbox"]::-webkit-scrollbar-track {
+    ul[role="listbox"][aria-label*="著者"]::-webkit-scrollbar-track {
       background: #e9e9e9;
       border-radius: 8px;
     }
-    ul[role="listbox"]::-webkit-scrollbar-thumb {
+    ul[role="listbox"][aria-label*="著者"]::-webkit-scrollbar-thumb {
       background: #555;
-      border-radius: 8px;
-      border: 3px solid #e9e9e9;        /* 外側に余白をとって“太く見せる” */
+      border-radius: 50%;        /* ← 丸くする */
+      min-height: 40px;          /* ← 小さくなりすぎない */
+      border: 3px solid #e9e9e9; /* 外枠をつけて“丸ボタン感” */
     }
-    ul[role="listbox"]::-webkit-scrollbar-thumb:hover {
+    ul[role="listbox"][aria-label*="著者"]::-webkit-scrollbar-thumb:hover {
       background: #333;
     }
     </style>
     """,
     unsafe_allow_html=True
-/* =========================================
-   MultiSelect / Select の候補リスト（共通）
-   ========================================= */
-ul[role="listbox"],
-.stMultiSelect [data-baseweb="menu"],
-.stSelectbox  [data-baseweb="menu"]{
-  /* 一度に表示しすぎない → サムが相対的に大きくなる */
-  max-height: 60vh !important;
-  overflow-y: auto !important;
-  /* Firefox でも配色を明示（サイズ比はブラウザ依存） */
-  scrollbar-width: auto;                 /* auto(太め) / thin */
-  scrollbar-color: #999 #e5e5e5;         /* thumb / track */
-}
-
-/* 候補1件あたりを少し高くして“実質”スクロール量を減らす（全ブラウザ） */
-ul[role="listbox"] li[role="option"],
-[data-baseweb="menu"] li[role="option"]{
-  padding: 8px 10px !important;
-  line-height: 1.25 !important;
-}
-
-/* ============ Chrome/Edge/Safari（WebKit）専用 ============ */
-ul[role="listbox"]::-webkit-scrollbar,
-[data-baseweb="menu"]::-webkit-scrollbar{
-  width: 12px;                           /* スクロールバー自体の太さ */
-}
-ul[role="listbox"]::-webkit-scrollbar-track,
-[data-baseweb="menu"]::-webkit-scrollbar-track{
-  background: #e5e5e5;
-  border-radius: 8px;
-}
-ul[role="listbox"]::-webkit-scrollbar-thumb,
-[data-baseweb="menu"]::-webkit-scrollbar-thumb{
-  background: #999;
-  border-radius: 8px;
-  border: 3px solid #f5f5f5;             /* thumbを視認しやすく */
-  min-height: 40px;                       /* ← サムの最低サイズ（WebKitのみ）*/
-}
-
-/* スクロールバー分の幅を常に確保（開閉で横ズレしない） */
-ul[role="listbox"]{ scrollbar-gutter: stable; }
-</style>
-""", unsafe_allow_html=True)
 )
 
 # -------------------- 定数 --------------------
