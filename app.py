@@ -404,7 +404,21 @@ with c_a:
             mask = adf["reading"].str.match(r"[A-Za-z]", na=False)
             cand = adf.loc[mask, ["reading","author"]].dropna().copy()
         else:
-            mask = adf["reading"].astype(str).str.startswith(author_initial)
+            # 各行ごとの先頭文字セット
+            groups = {
+                "あ": "あいうえお",
+                "か": "かきくけこ",
+                "さ": "さしすせそ",
+                "た": "たちつてと",
+                "な": "なにぬねの",
+                "は": "はひふへほ",
+                "ま": "まみむめも",
+                "や": "やゆよ",
+                "ら": "らりるれろ",
+                "わ": "わをん",
+            }
+            group = groups.get(author_initial, author_initial)
+            mask = adf["reading"].astype(str).str[0].isin(list(group))
             cand = adf.loc[mask, ["reading","author"]].dropna().copy()
 
         # 並び順調整（ひらがな→カタカナ→英字）
