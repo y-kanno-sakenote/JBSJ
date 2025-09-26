@@ -15,9 +15,106 @@ import io, re, time
 import pandas as pd
 import requests
 import streamlit as st
+from pathlib import Path
 
 # -------------------- ページ設定 --------------------
 st.set_page_config(page_title="論文検索（統一UI版）", layout="wide")
+
+
+# -------------------- コントラスト（著者ドロップダウン強化版） --------------------
+st.markdown(
+    """
+    <style>
+    /* ========= テキスト入力欄（枠線あり） ========= */
+    .stTextInput input, .stNumberInput input, textarea {
+      background-color: #e0e0e0 !important;
+      color: #000 !important;
+      border: 1px solid #666 !important;
+      border-radius: 6px !important;
+      padding: 4px 8px !important;
+    }
+
+    /* ========= Select / MultiSelect（外枠デザイン） ========= */
+    .stMultiSelect div[data-baseweb="select"],
+    .stSelectbox  div[data-baseweb="select"] {
+      background-color: #e0e0e0 !important;
+      border: 1px solid #666 !important;
+      border-radius: 6px !important;
+    }
+    div[data-baseweb="select"] > div { background: transparent !important; }
+    div[data-baseweb="select"] span { color: #000 !important; }
+    div[data-baseweb="select"] svg  { color: #000 !important; fill: #000 !important; }
+
+    /* MultiSelect のタグ */
+    div[data-baseweb="tag"] {
+      background: #d5d5d5 !important;
+      color: #000 !important;
+      border-radius: 12px !important;
+    }
+
+    /* --- フォーカス時のスタイル --- */
+    input:focus, textarea:focus,
+    .stTextInput input:focus, .stNumberInput input:focus {
+      border: 2px solid #1a73e8 !important;
+      box-shadow: 0 0 4px #1a73e8 !important;
+      outline: none !important;
+    }
+    .stMultiSelect div[data-baseweb="select"]:focus-within,
+    .stSelectbox  div[data-baseweb="select"]:focus-within {
+      border: 2px solid #1a73e8 !important;
+      box-shadow: 0 0 4px #1a73e8 !important;
+    }
+    .stMultiSelect input:focus,
+    .stSelectbox  input:focus {
+      border: none !important;
+      box-shadow: none !important;
+      outline: none !important;
+    }
+
+    /* ======== ドロップダウン（候補リスト）を“高く & 太いスクロール”に ======== */
+    ul[role="listbox"] {
+      background: #f5f5f5 !important;
+      border: 1px solid #666 !important;
+      max-height: 70vh !important;     /* 画面の7割まで高く */
+      min-height: 360px !important;     /* 低解像度でも十分な高さを確保 */
+      overflow-y: auto !important;
+      padding-right: 6px !important;    /* スクロールバーぶんの余白 */
+      scrollbar-width: auto;            /* Firefox: 太め */
+      scrollbar-color: #555 #e9e9e9;    /* Firefox: コントラスト強め */
+    }
+    /* 候補1行を少し高く＝当たり判定を大きくして選びやすく */
+    li[role="option"] {
+      padding: 8px 12px !important;
+      line-height: 1.4 !important;
+      font-size: 0.95rem !important;
+    }
+    li[role="option"]:hover,
+    li[role="option"][aria-selected="true"] {
+      background: #e0e0e0 !important;
+      color: #000 !important;
+    }
+
+    /* WebKit 系（Chrome/Edge/Safari）のスクロールバーを太く＆高コントラストに */
+    ul[role="listbox"]::-webkit-scrollbar {
+      width: 16px;                      /* ← 太くする */
+    }
+    ul[role="listbox"]::-webkit-scrollbar-track {
+      background: #e9e9e9;
+      border-radius: 8px;
+    }
+    ul[role="listbox"]::-webkit-scrollbar-thumb {
+      background: #555;
+      border-radius: 8px;
+      border: 3px solid #e9e9e9;        /* 外側に余白をとって“太く見せる” */
+    }
+    ul[role="listbox"]::-webkit-scrollbar-thumb:hover {
+      background: #333;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+
+)
 
 # -------------------- 定数 --------------------
 KEY_COLS = [
@@ -101,15 +198,13 @@ def build_author_candidates(df: pd.DataFrame):
                 rep[k] = name
     return [rep[k] for k in sorted(rep.keys())]
 
-def haystack(row, include_fulltext: bool):
+def haystack(row):
     parts = [
         str(row.get("論文タイトル","")),
         str(row.get("著者","")),
         str(row.get("file_name","")),
         " ".join(str(row.get(c,"")) for c in KEY_COLS if c in row),
     ]
-    if include_fulltext and "pdf_text" in row:
-        parts.append(str(row.get("pdf_text","")))
     return norm_key(" \n ".join(parts))
 
 def to_int_or_none(x):
@@ -151,9 +246,10 @@ def make_row_id(row):
 # -------------------- データ読み込み --------------------
 st.title("醸造協会誌　論文検索")
 
-from pathlib import Path
+DEMO_CSV_PATH = Path("data/keywords_summary5.csv")   # メインCSV
+SUMMARY_CSV_PATH = Path("data/summaries.csv")         # ← 追加: summary
+AUTHORS_CSV_PATH = Path("data/authors_readings.csv")  # ← 追加: 著者読み
 
-DEMO_CSV_PATH = Path("data/keywords_summary4.csv")  # リポに同梱したテストCSV
 SECRET_URL = st.secrets.get("GSHEET_CSV_URL", "")  # （任意）Secretsに入れておけば自動使用
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -164,25 +260,38 @@ def load_local_csv(path: Path) -> pd.DataFrame:
 def load_url_csv(url: str) -> pd.DataFrame:
     return ensure_cols(fetch_csv(url))
 
-# === 追加: 著者読みCSVのローダ（authors_readings.csv） ===
-AUTHORS_CSV_PATH = Path("data/authors_readings.csv")
+# --- 追加：summaries.csv ローダ ---
+@st.cache_data(ttl=600, show_spinner=False)
+def load_summaries(path: Path) -> pd.DataFrame | None:
+    try:
+        if not path.exists():
+            return None
+        df_s = pd.read_csv(path, encoding="utf-8")
+        df_s.columns = [str(c).strip() for c in df_s.columns]
+        if not {"file_name", "summary"}.issubset(df_s.columns):
+            return None
+        return df_s[["file_name", "summary"]]
+    except Exception:
+        return None
 
+# --- 追加：authors_readings.csv ローダ ---
 @st.cache_data(ttl=600, show_spinner=False)
 def load_authors_readings(path: Path) -> pd.DataFrame | None:
     try:
-        df_a = pd.read_csv(path, encoding="utf-8")
-        df_a.columns = [str(c).strip() for c in df_a.columns]
-        if not {"author", "reading"}.issubset(set(df_a.columns)):
+        if not path.exists():
             return None
-        df_a["author"]  = df_a["author"].astype(str).str.strip()
-        df_a["reading"] = df_a["reading"].astype(str).str.strip()
-        df_a = df_a[(df_a["author"]!="") & (df_a["reading"]!="")]
-        # 重複 reading は author 優先でユニーク化
-        df_a = df_a.drop_duplicates(subset=["reading"], keep="first")
-        return df_a
+        adf = pd.read_csv(path, encoding="utf-8")
+        adf.columns = [str(c).strip() for c in adf.columns]
+        if not {"author", "reading"}.issubset(adf.columns):
+            return None
+        adf["author"]  = adf["author"].astype(str).str.strip()
+        adf["reading"] = adf["reading"].astype(str).str.strip()
+        adf = adf[(adf["author"]!="") & (adf["reading"]!="")]
+        # 同じ reading が複数ある場合は先勝ち
+        adf = adf.drop_duplicates(subset=["reading"], keep="first")
+        return adf
     except Exception:
         return None
-# === 追加ここまで ===
 
 with st.sidebar:
     st.header("データ読み込み")
@@ -227,6 +336,11 @@ if df is None:
     st.info("左のサイドバーで CSV を指定するか、デモCSVを有効にしてください。")
     st.stop()
 
+# --- 追加：summary をマージ ---
+sum_df = load_summaries(SUMMARY_CSV_PATH)
+if sum_df is not None:
+    df = df.merge(sum_df, on="file_name", how="left")
+
 # -------------------- 年・巻・号フィルタ --------------------
 st.subheader("年・巻・号フィルタ")
 year_vals = pd.to_numeric(df.get("発行年", pd.Series(dtype=str)), errors="coerce")
@@ -253,43 +367,49 @@ st.subheader("検索フィルタ")
 c_a, c_tg, c_tp = st.columns([1.2, 1.2, 1.2])
 
 with c_a:
-    # === ここだけ置き換え：著者オートコンプリート（読みで検索・表示は漢字） ===
+    # 著者（読みで検索・表示は漢字＋読み）
     adf = load_authors_readings(AUTHORS_CSV_PATH)
     if adf is not None:
         reading2author = dict(zip(adf["reading"], adf["author"]))
-        options_readings = sorted(reading2author.keys())
-        # 検索は options（=reading）に対して行われるので、表示に reading も含める
+
+        def is_katakana_or_english(name: str) -> bool:
+            if re.match(r"^[A-Za-z]", name):
+                return True  # 英語
+            if re.match(r"^[\u30A0-\u30FF]", name):
+                return True  # カタカナ
+            return False
+
+        # --- 並び替え: 日本語（漢字/ひらがな）→ カタカナ・英語 ---
+        jp_readings = [r for r, a in reading2author.items() if not is_katakana_or_english(a)]
+        other_readings = [r for r, a in reading2author.items() if is_katakana_or_english(a)]
+        options_readings = sorted(jp_readings) + sorted(other_readings)
+
         authors_sel_readings = st.multiselect(
             "著者（読みで検索可 / 表示は漢字＋読み）",
             options=options_readings,
             format_func=lambda r: f"{reading2author.get(r, r)}｜{r}",
             placeholder="例：やまだ / さとう / たかはし ..."
         )
-        # 後段のフィルタは従来通り「著者（漢字）」で行いたいので、変換して authors_sel に入れる
         authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
     else:
-        # フォールバック：従来の著者 multiselect
         authors_all = build_author_candidates(df)
         authors_sel = st.multiselect("著者", authors_all, default=[])
-    # === 置き換えここまで ===
 
 with c_tg:
     raw_targets = {t for v in df.get("対象物_top3", pd.Series(dtype=str)).fillna("") for t in split_multi(v)}
     targets_all = order_by_template(list(raw_targets), TARGET_ORDER)
     targets_sel = st.multiselect("対象物（複数選択／部分一致）", targets_all, default=[])
+
 with c_tp:
     raw_types = {t for v in df.get("研究タイプ_top3", pd.Series(dtype=str)).fillna("") for t in split_multi(v)}
     types_all = order_by_template(list(raw_types), TYPE_ORDER)
     types_sel = st.multiselect("研究タイプ（複数選択／部分一致）", types_all, default=[])
-
 # -------------------- キーワード検索 --------------------
-c_kw1, c_kw2, c_kw3 = st.columns([3, 1, 1])
+c_kw1, c_kw2 = st.columns([3, 1])
 with c_kw1:
     kw_query = st.text_input("キーワード（空白/カンマで複数可）", value="")
 with c_kw2:
     kw_mode = st.radio("一致条件", ["OR", "AND"], index=0, horizontal=True, key="kw_mode")
-with c_kw3:
-    include_fulltext = st.checkbox("本文も検索（pdf_text）", value=True)
 
 # -------------------- フィルタ適用 --------------------
 def apply_filters(_df: pd.DataFrame) -> pd.DataFrame:
@@ -314,7 +434,7 @@ def apply_filters(_df: pd.DataFrame) -> pd.DataFrame:
     toks = tokens_from_query(kw_query)
     if toks:
         def hit_kw(row):
-            hs = haystack(row, include_fulltext=include_fulltext)
+            hs = haystack(row)
             return all(t in hs for t in toks) if kw_mode == "AND" else any(t in hs for t in toks)
         df2 = df2[df2.apply(hit_kw, axis=1)]
     return df2
@@ -326,6 +446,13 @@ st.markdown("### 検索結果")
 st.caption(f"{len(filtered)} / {len(df)} 件")
 
 visible_cols = make_visible_cols(filtered)
+
+# ★ ここで summary の位置を調整（著者の右に挿入）
+if "著者" in visible_cols and "summary" in filtered.columns:
+    idx = visible_cols.index("著者")
+    if "summary" not in visible_cols:
+        visible_cols.insert(idx + 1, "summary")
+
 disp = filtered.loc[:, visible_cols].copy()
 disp["_row_id"] = disp.apply(make_row_id, axis=1)
 
@@ -380,6 +507,14 @@ with c2:
 
 # お気に入り一覧（フィルタ無視で全体から）＋ tags 列（編集可）
 visible_cols_full = make_visible_cols(df)
+
+# ★ こちらも同じように summary を著者の右へ
+if "著者" in visible_cols_full and "summary" in df.columns:
+    idx = visible_cols_full.index("著者")
+    if "summary" not in visible_cols_full:
+        visible_cols_full.insert(idx + 1, "summary")
+
+fav_disp_full = df.loc[:, visible_cols_full].copy()
 fav_disp_full = df.loc[:, visible_cols_full].copy()
 fav_disp_full["_row_id"] = fav_disp_full.apply(make_row_id, axis=1)
 fav_disp = fav_disp_full[fav_disp_full["_row_id"].isin(st.session_state.favs)].copy()
