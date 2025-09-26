@@ -21,7 +21,7 @@ from pathlib import Path
 st.set_page_config(page_title="論文検索（統一UI版）", layout="wide")
 
 
-# -------------------- コントラスト（著者ドロップダウン強化版） --------------------
+# -------------------- コントラスト（著者ドロップダウン強化版：丸い固定サム） --------------------
 st.markdown(
     """
     <style>
@@ -71,43 +71,58 @@ st.markdown(
       outline: none !important;
     }
 
-    /* ======== 著者ドロップダウン専用（候補リスト） ======== */
-    ul[role="listbox"][aria-label*="著者"] {
+    /* ======== ドロップダウン（候補リスト）を“高く & 太いスクロール”に ======== */
+    ul[role="listbox"] {
       background: #f5f5f5 !important;
       border: 1px solid #666 !important;
       max-height: 70vh !important;
+      min-height: 360px !important;
       overflow-y: auto !important;
       padding-right: 6px !important;
-      scrollbar-width: auto;            
-      scrollbar-color: #555 #e9e9e9;    
+      scrollbar-width: auto;            /* Firefox */
+      scrollbar-color: #555 #e9e9e9;    /* Firefox */
     }
-    ul[role="listbox"][aria-label*="著者"] li[role="option"] {
+    li[role="option"] {
       padding: 8px 12px !important;
       line-height: 1.4 !important;
       font-size: 0.95rem !important;
     }
-    ul[role="listbox"][aria-label*="著者"] li[role="option"]:hover,
-    ul[role="listbox"][aria-label*="著者"] li[role="option"][aria-selected="true"] {
+    li[role="option"]:hover,
+    li[role="option"][aria-selected="true"] {
       background: #e0e0e0 !important;
       color: #000 !important;
     }
 
-    /* Chrome/Edge/Safari 用 丸スクロールバー */
-    ul[role="listbox"][aria-label*="著者"]::-webkit-scrollbar {
-      width: 16px;
-    }
-    ul[role="listbox"][aria-label*="著者"]::-webkit-scrollbar-track {
+    /* WebKit 系の標準スクロール（他ドロップダウン用） */
+    ul[role="listbox"]::-webkit-scrollbar { width: 16px; }
+    ul[role="listbox"]::-webkit-scrollbar-track {
       background: #e9e9e9;
       border-radius: 8px;
     }
-    ul[role="listbox"][aria-label*="著者"]::-webkit-scrollbar-thumb {
+    ul[role="listbox"]::-webkit-scrollbar-thumb {
       background: #555;
-      border-radius: 50%;        /* ← 丸くする */
-      min-height: 40px;          /* ← 小さくなりすぎない */
-      border: 3px solid #e9e9e9; /* 外枠をつけて“丸ボタン感” */
+      border-radius: 8px;
+      border: 3px solid #e9e9e9;
+    }
+    ul[role="listbox"]::-webkit-scrollbar-thumb:hover { background: #333; }
+
+    /* ======== 著者ドロップダウン専用：丸い固定ハンドル ======== */
+    /* ラベルに「著者」を含む候補リストだけ上書き */
+    ul[role="listbox"][aria-label*="著者"]::-webkit-scrollbar { width: 18px !important; }
+    ul[role="listbox"][aria-label*="著者"]::-webkit-scrollbar-track {
+      background: #e9e9e9 !important;
+      border-radius: 9px !important;
+    }
+    ul[role="listbox"][aria-label*="著者"]::-webkit-scrollbar-thumb {
+      background: #555 !important;
+      border-radius: 999px !important;   /* 完全な丸 */
+      border: 4px solid #e9e9e9 !important;
+      height: 40px !important;           /* 固定サイズ */
+      min-height: 40px !important;
+      max-height: 40px !important;
     }
     ul[role="listbox"][aria-label*="著者"]::-webkit-scrollbar-thumb:hover {
-      background: #333;
+      background: #333 !important;
     }
     </style>
     """,
