@@ -361,12 +361,32 @@ with c_v:
 with c_i:
     iss_candidates = sorted({v for v in (df.get("号数", pd.Series(dtype=str)).map(to_int_or_none)).dropna().unique()})
     issues_sel = st.multiselect("号（複数選択）", iss_candidates, default=[])
-# --- 著者（あかさたなラジオボタン → オートコンプリート）---
+# -------------------- 著者・対象物・研究タイプフィルタ --------------------
+st.subheader("検索フィルタ")
+
+# 3列レイアウト（対象物 / 研究タイプ / 著者）
+c_tg, c_tp, c_a = st.columns([1.2, 1.2, 1.2])
+
+# --- 対象物 ---
+with c_tg:
+    raw_targets = {t for v in df.get("対象物_top3", pd.Series(dtype=str)).fillna("")
+                   for t in split_multi(v)}
+    targets_all = order_by_template(list(raw_targets), TARGET_ORDER)
+    targets_sel = st.multiselect("対象物（複数選択／部分一致）", targets_all, default=[])
+
+# --- 研究タイプ ---
+with c_tp:
+    raw_types = {t for v in df.get("研究タイプ_top3", pd.Series(dtype=str)).fillna("")
+                 for t in split_multi(v)}
+    types_all = order_by_template(list(raw_types), TYPE_ORDER)
+    types_sel = st.multiselect("研究タイプ（複数選択／部分一致）", types_all, default=[])
+
+# --- 著者 ---
 with c_a:
     st.caption("著者の読み頭文字でサジェストを絞り込み")
     initials = ["あ","か","さ","た","な","は","ま","や","ら","わ","英字"]
 
-    # ラジオボタン（横並び）
+    # 横並びのラジオボタン
     author_initial = st.radio(
         "頭文字を選択",
         initials,
@@ -375,39 +395,34 @@ with c_a:
         key="author_initial_radio"
     )
 
-    # authors_readings.csv を読み込み
     adf = load_authors_readings(AUTHORS_CSV_PATH)
     if adf is not None and not adf.empty:
-        # イニシャルフィルタ
         if author_initial == "英字":
             mask = adf["reading"].str.match(r"[A-Za-z]", na=False)
         else:
             mask = adf["reading"].astype(str).str.startswith(author_initial)
-        cand = adf.loc[mask, ["reading", "author"]].dropna().copy()
+        cand = adf.loc[mask, ["reading","author"]].dropna().copy()
 
-        # 並べ替え（ひらがな→カタカナ→英字）
-        def is_roman(hira: str) -> bool:
-            return bool(re.match(r"[A-Za-z]", str(hira or "")))
-        def is_katakana(s: str) -> bool:
-            return bool(re.match(r"[\u30A0-\u30FF]", str(s or "")))
-        def sort_tuple(row):
-            r = str(row["reading"])
-            if is_roman(r): return (2, r.lower())
-            if is_katakana(r): return (1, r)
-            return (0, r)
-        _tmp = cand.apply(lambda r: pd.Series(sort_tuple(r), index=["_grp", "_key"]), axis=1)
-        cand = (pd.concat([cand.reset_index(drop=True), _tmp], axis=1)
-                  .sort_values(by=["_grp","_key"], kind="mergesort")
-                  .drop(columns=["_grp","_key"])
-                  .reset_index(drop=True))
+        # 並び順調整（ひらがな→カタカナ→英字）
+        def is_roman(s): return bool(re.match(r"[A-Za-z]", str(s or "")))
+        def is_katakana(s): return bool(re.match(r"[\u30A0-\u30FF]", str(s or "")))
+        def sort_tuple(r):
+            rr = str(r["reading"])
+            if is_roman(rr): return (2, rr.lower())
+            if is_katakana(rr): return (1, rr)
+            return (0, rr)
 
-        # multiselect
+        _tmp = cand.apply(lambda r: pd.Series(sort_tuple(r), index=["_grp","_key"]), axis=1)
+        cand = pd.concat([cand.reset_index(drop=True), _tmp], axis=1) \
+                 .sort_values(by=["_grp","_key"], kind="mergesort") \
+                 .drop(columns=["_grp","_key"]).reset_index(drop=True)
+
         reading2author = dict(zip(cand["reading"], cand["author"]))
         options_readings = list(reading2author.keys())
         authors_sel_readings = st.multiselect(
             "著者（読みで検索可 / 表示は漢字＋読み）",
             options=options_readings,
-            format_func=lambda r: f"{reading2author.get(r, r)}｜{r}",
+            format_func=lambda r: f"{reading2author.get(r,r)}｜{r}",
             placeholder="例：やまだ / さとう / たかはし ..."
         )
         authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
