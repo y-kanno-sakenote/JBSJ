@@ -73,9 +73,6 @@ def ensure_cols(df: pd.DataFrame) -> pd.DataFrame:
     df.columns = [str(c).strip() for c in df.columns]
     return df
 
-
-
-
 def consolidate_authors_column(df: pd.DataFrame) -> pd.DataFrame:
     """著者列：空白では分割せず、区切り記号のみで分割→同名異表記を代表表記に統合"""
     if "著者" not in df.columns:
@@ -167,6 +164,26 @@ def load_local_csv(path: Path) -> pd.DataFrame:
 def load_url_csv(url: str) -> pd.DataFrame:
     return ensure_cols(fetch_csv(url))
 
+# === 追加: 著者読みCSVのローダ（authors_readings.csv） ===
+AUTHORS_CSV_PATH = Path("data/authors_readings.csv")
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_authors_readings(path: Path) -> pd.DataFrame | None:
+    try:
+        df_a = pd.read_csv(path, encoding="utf-8")
+        df_a.columns = [str(c).strip() for c in df_a.columns]
+        if not {"author", "reading"}.issubset(set(df_a.columns)):
+            return None
+        df_a["author"]  = df_a["author"].astype(str).str.strip()
+        df_a["reading"] = df_a["reading"].astype(str).str.strip()
+        df_a = df_a[(df_a["author"]!="") & (df_a["reading"]!="")]
+        # 重複 reading は author 優先でユニーク化
+        df_a = df_a.drop_duplicates(subset=["reading"], keep="first")
+        return df_a
+    except Exception:
+        return None
+# === 追加ここまで ===
+
 with st.sidebar:
     st.header("データ読み込み")
     st.caption("※ まずはデモ用CSVを自動ロード。URL/ファイル指定で上書きできます。")
@@ -234,9 +251,28 @@ with c_i:
 # -------------------- 著者・対象物・研究タイプフィルタ --------------------
 st.subheader("検索フィルタ")
 c_a, c_tg, c_tp = st.columns([1.2, 1.2, 1.2])
+
 with c_a:
-    authors_all = build_author_candidates(df)
-    authors_sel = st.multiselect("著者", authors_all, default=[])
+    # === ここだけ置き換え：著者オートコンプリート（読みで検索・表示は漢字） ===
+    adf = load_authors_readings(AUTHORS_CSV_PATH)
+    if adf is not None:
+        reading2author = dict(zip(adf["reading"], adf["author"]))
+        options_readings = sorted(reading2author.keys())
+        # 検索は options（=reading）に対して行われるので、表示に reading も含める
+        authors_sel_readings = st.multiselect(
+            "著者（読みで検索可 / 表示は漢字＋読み）",
+            options=options_readings,
+            format_func=lambda r: f"{reading2author.get(r, r)}｜{r}",
+            placeholder="例：やまだ / さとう / たかはし ..."
+        )
+        # 後段のフィルタは従来通り「著者（漢字）」で行いたいので、変換して authors_sel に入れる
+        authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
+    else:
+        # フォールバック：従来の著者 multiselect
+        authors_all = build_author_candidates(df)
+        authors_sel = st.multiselect("著者", authors_all, default=[])
+    # === 置き換えここまで ===
+
 with c_tg:
     raw_targets = {t for v in df.get("対象物_top3", pd.Series(dtype=str)).fillna("") for t in split_multi(v)}
     targets_all = order_by_template(list(raw_targets), TARGET_ORDER)
@@ -407,7 +443,7 @@ else:
     st.info("お気に入りは未選択です。上の表の『★』にチェックしてから反映してください。")
     fav_edited = None
 
-# -------------------- タグでお気に入りを絞り込み（折り畳み） --------------------
+# -------------------- タグでお気に入りを絞り込み（AND/OR） --------------------
 with st.expander("🔎 タグでお気に入りを絞り込み（AND/OR）", expanded=False):
     tag_query = st.text_input("タグ検索（カンマ/空白区切り）", key="tag_query")
     tag_mode = st.radio("一致条件", ["OR", "AND"], index=0, horizontal=True, key="tag_mode")
