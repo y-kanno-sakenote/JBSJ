@@ -25,52 +25,43 @@ st.set_page_config(page_title="論文検索（統一UI版）", layout="wide")
 st.markdown(
     """
     <style>
-    /* ========= 共通：入力枠のトーン ========== */
-    input, textarea, select {
+    /* ========= テキスト入力欄（枠線あり） ========= */
+    .stTextInput input, .stNumberInput input, textarea {
       background-color: #e0e0e0 !important;
       color: #000 !important;
       border: 1px solid #666 !important;
       border-radius: 6px !important;
       padding: 4px 8px !important;
     }
-    .stTextInput input, .stNumberInput input {
-      background-color: #e0e0e0 !important;
-      color: #000 !important;
-      border: 1px solid #666 !important;
-    }
 
-    /* ========= Select / MultiSelect を統一 ========== */
-    /* 外枠（見える枠）はここ */
+    /* ========= Select / MultiSelect（枠線なし） ========= */
     .stMultiSelect div[data-baseweb="select"],
-    .stSelectbox  div[data-baseweb="select"]{
+    .stSelectbox  div[data-baseweb="select"] {
       background-color: #e0e0e0 !important;
-      border: 1px solid #666 !important;
+      border: none !important;        /* ← 外枠消す */
       border-radius: 6px !important;
     }
-    /* 内側の“二重枠”を消して段差感をなくす */
     div[data-baseweb="select"] > div {
       border: none !important;
       background: transparent !important;
     }
-    /* テキスト/プレースホルダ/選択済みの色 */
     div[data-baseweb="select"] span {
       color: #000 !important;
     }
-    /* チェブロン/×アイコンの色 */
     div[data-baseweb="select"] svg {
       color: #000 !important;
       fill: #000 !important;
     }
-    /* MultiSelect のタグ（選択済みピル） */
+
+    /* MultiSelect のタグ */
     div[data-baseweb="tag"] {
       background: #d5d5d5 !important;
       color: #000 !important;
-      border: 1px solid #666 !important;
       border-radius: 12px !important;
     }
 
-    /* フォーカス時の見た目を統一（青のアウトライン） */
-    input:focus, textarea:focus, select:focus,
+    /* フォーカス時：アウトラインを青で統一 */
+    input:focus, textarea:focus,
     .stTextInput input:focus, .stNumberInput input:focus,
     .stMultiSelect div[data-baseweb="select"]:focus-within,
     .stSelectbox  div[data-baseweb="select"]:focus-within {
@@ -79,7 +70,7 @@ st.markdown(
       outline: none !important;
     }
 
-    /* ドロップダウンメニュー側も同トーンに */
+    /* ドロップダウンメニュー */
     ul[role="listbox"] {
       background: #f5f5f5 !important;
       border: 1px solid #666 !important;
