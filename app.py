@@ -21,6 +21,53 @@ from pathlib import Path
 st.set_page_config(page_title="論文検索（統一UI版）", layout="wide")
 
 
+# -------------------- コントラスト --------------------
+st.markdown(
+    """
+    <style>
+    /* 入力欄の背景だけ濃いグレーにする */
+    input, textarea, select {
+        background-color: #e0e0e0 !important;  /* ←ここを濃く */
+        color: #000000 !important;
+        border: 1px solid #666 !important;
+        border-radius: 6px !important;
+        padding: 4px 8px !important;
+    }
+
+    /* Streamlit の text_input / number_input */
+    .stTextInput input, .stNumberInput input {
+        background-color: #e0e0e0 !important;
+        color: #000000 !important;
+        border: 1px solid #666 !important;
+    }
+
+    /* multiselect の外枠 */
+    .stMultiSelect div[data-baseweb="select"] {
+        background-color: #e0e0e0 !important;
+        color: #000000 !important;
+        border: 1px solid #666 !important;
+    }
+
+    /* selectbox */
+    .stSelectbox div[data-baseweb="select"] {
+        background-color: #e0e0e0 !important;
+        color: #000000 !important;
+        border: 1px solid #666 !important;
+    }
+
+    /* フォーカス時 */
+    input:focus, textarea:focus, select:focus,
+    .stTextInput input:focus, .stNumberInput input:focus,
+    .stMultiSelect div[data-baseweb="select"]:focus-within,
+    .stSelectbox div[data-baseweb="select"]:focus-within {
+        border: 2px solid #1a73e8 !important;
+        box-shadow: 0 0 4px #1a73e8 !important;
+        outline: none !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
 # -------------------- 定数 --------------------
 KEY_COLS = [
