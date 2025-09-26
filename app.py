@@ -34,15 +34,14 @@ st.markdown(
       padding: 4px 8px !important;
     }
 
-    /* ========= Select / MultiSelect（枠線なし） ========= */
+    /* ========= Select / MultiSelect（外枠デザイン） ========= */
     .stMultiSelect div[data-baseweb="select"],
     .stSelectbox  div[data-baseweb="select"] {
       background-color: #e0e0e0 !important;
-      border: none !important;        /* ← 外枠消す */
+      border: 1px solid #666 !important;
       border-radius: 6px !important;
     }
     div[data-baseweb="select"] > div {
-      border: none !important;
       background: transparent !important;
     }
     div[data-baseweb="select"] span {
@@ -60,15 +59,25 @@ st.markdown(
       border-radius: 12px !important;
     }
 
-    /* --- フォーカス時の青枠を削除 --- */
+    /* --- フォーカス時のスタイル --- */
+    /* テキスト入力・NumberInput は青枠 */
     input:focus, textarea:focus,
     .stTextInput input:focus, .stNumberInput input:focus {
       border: 2px solid #1a73e8 !important;
       box-shadow: 0 0 4px #1a73e8 !important;
       outline: none !important;
     }
+
+    /* Select / MultiSelect 本体は青枠を維持 */
     .stMultiSelect div[data-baseweb="select"]:focus-within,
     .stSelectbox  div[data-baseweb="select"]:focus-within {
+      border: 2px solid #1a73e8 !important;
+      box-shadow: 0 0 4px #1a73e8 !important;
+    }
+
+    /* プルダウン内部の検索入力欄は青枠を消す */
+    .stMultiSelect input:focus,
+    .stSelectbox  input:focus {
       border: none !important;
       box-shadow: none !important;
       outline: none !important;
