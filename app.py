@@ -380,8 +380,6 @@ with row1_tp:
 # -------------------- 検索フィルタ（2段目：著者 + イニシャルラジオ横並び） --------------------
 row2_author, row2_radio = st.columns([1.6, 1.2])
 
-with row2_author:
-
 with row2_radio:
     initials = ["すべて","あ","か","さ","た","な","は","ま","や","ら","わ","英字"]
     if "author_initial" not in st.session_state:
