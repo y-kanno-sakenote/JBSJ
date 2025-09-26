@@ -113,6 +113,49 @@ st.markdown(
     </style>
     """,
     unsafe_allow_html=True
+/* =========================================
+   MultiSelect / Select の候補リスト（共通）
+   ========================================= */
+ul[role="listbox"],
+.stMultiSelect [data-baseweb="menu"],
+.stSelectbox  [data-baseweb="menu"]{
+  /* 一度に表示しすぎない → サムが相対的に大きくなる */
+  max-height: 60vh !important;
+  overflow-y: auto !important;
+  /* Firefox でも配色を明示（サイズ比はブラウザ依存） */
+  scrollbar-width: auto;                 /* auto(太め) / thin */
+  scrollbar-color: #999 #e5e5e5;         /* thumb / track */
+}
+
+/* 候補1件あたりを少し高くして“実質”スクロール量を減らす（全ブラウザ） */
+ul[role="listbox"] li[role="option"],
+[data-baseweb="menu"] li[role="option"]{
+  padding: 8px 10px !important;
+  line-height: 1.25 !important;
+}
+
+/* ============ Chrome/Edge/Safari（WebKit）専用 ============ */
+ul[role="listbox"]::-webkit-scrollbar,
+[data-baseweb="menu"]::-webkit-scrollbar{
+  width: 12px;                           /* スクロールバー自体の太さ */
+}
+ul[role="listbox"]::-webkit-scrollbar-track,
+[data-baseweb="menu"]::-webkit-scrollbar-track{
+  background: #e5e5e5;
+  border-radius: 8px;
+}
+ul[role="listbox"]::-webkit-scrollbar-thumb,
+[data-baseweb="menu"]::-webkit-scrollbar-thumb{
+  background: #999;
+  border-radius: 8px;
+  border: 3px solid #f5f5f5;             /* thumbを視認しやすく */
+  min-height: 40px;                       /* ← サムの最低サイズ（WebKitのみ）*/
+}
+
+/* スクロールバー分の幅を常に確保（開閉で横ズレしない） */
+ul[role="listbox"]{ scrollbar-gutter: stable; }
+</style>
+""", unsafe_allow_html=True)
 )
 
 # -------------------- 定数 --------------------
