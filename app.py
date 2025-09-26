@@ -21,7 +21,7 @@ from pathlib import Path
 st.set_page_config(page_title="論文検索（統一UI版）", layout="wide")
 
 
-# -------------------- コントラスト --------------------
+# -------------------- コントラスト（著者ドロップダウン強化版） --------------------
 st.markdown(
     """
     <style>
@@ -41,16 +41,9 @@ st.markdown(
       border: 1px solid #666 !important;
       border-radius: 6px !important;
     }
-    div[data-baseweb="select"] > div {
-      background: transparent !important;
-    }
-    div[data-baseweb="select"] span {
-      color: #000 !important;
-    }
-    div[data-baseweb="select"] svg {
-      color: #000 !important;
-      fill: #000 !important;
-    }
+    div[data-baseweb="select"] > div { background: transparent !important; }
+    div[data-baseweb="select"] span { color: #000 !important; }
+    div[data-baseweb="select"] svg  { color: #000 !important; fill: #000 !important; }
 
     /* MultiSelect のタグ */
     div[data-baseweb="tag"] {
@@ -78,14 +71,22 @@ st.markdown(
       outline: none !important;
     }
 
-    /* ドロップダウンメニュー */
+    /* ======== ドロップダウン（候補リスト）を“高く & 太いスクロール”に ======== */
     ul[role="listbox"] {
       background: #f5f5f5 !important;
       border: 1px solid #666 !important;
-      max-height: 280px !important;   /* ▼ 高さ制限して内部スクロール */
+      max-height: 70vh !important;     /* 画面の7割まで高く */
+      min-height: 360px !important;     /* 低解像度でも十分な高さを確保 */
       overflow-y: auto !important;
-      scrollbar-width: thin;           /* Firefox */
-      scrollbar-color: #888 #eee;      /* Firefox */
+      padding-right: 6px !important;    /* スクロールバーぶんの余白 */
+      scrollbar-width: auto;            /* Firefox: 太め */
+      scrollbar-color: #555 #e9e9e9;    /* Firefox: コントラスト強め */
+    }
+    /* 候補1行を少し高く＝当たり判定を大きくして選びやすく */
+    li[role="option"] {
+      padding: 8px 12px !important;
+      line-height: 1.4 !important;
+      font-size: 0.95rem !important;
     }
     li[role="option"]:hover,
     li[role="option"][aria-selected="true"] {
@@ -93,21 +94,21 @@ st.markdown(
       color: #000 !important;
     }
 
-    /* WebKit 系（Chrome/Edge/Safari）のスクロールバー */
+    /* WebKit 系（Chrome/Edge/Safari）のスクロールバーを太く＆高コントラストに */
     ul[role="listbox"]::-webkit-scrollbar {
-      width: 10px;
+      width: 16px;                      /* ← 太くする */
     }
     ul[role="listbox"]::-webkit-scrollbar-track {
-      background: #eee;
-      border-radius: 6px;
+      background: #e9e9e9;
+      border-radius: 8px;
     }
     ul[role="listbox"]::-webkit-scrollbar-thumb {
-      background: #888;
-      border-radius: 6px;
-      border: 2px solid #eee;
+      background: #555;
+      border-radius: 8px;
+      border: 3px solid #e9e9e9;        /* 外側に余白をとって“太く見せる” */
     }
     ul[role="listbox"]::-webkit-scrollbar-thumb:hover {
-      background: #666;
+      background: #333;
     }
     </style>
     """,
