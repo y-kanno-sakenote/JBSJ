@@ -60,13 +60,17 @@ st.markdown(
       border-radius: 12px !important;
     }
 
-    /* フォーカス時：アウトラインを青で統一 */
+    /* --- フォーカス時の青枠を削除 --- */
     input:focus, textarea:focus,
-    .stTextInput input:focus, .stNumberInput input:focus,
-    .stMultiSelect div[data-baseweb="select"]:focus-within,
-    .stSelectbox  div[data-baseweb="select"]:focus-within {
+    .stTextInput input:focus, .stNumberInput input:focus {
       border: 2px solid #1a73e8 !important;
       box-shadow: 0 0 4px #1a73e8 !important;
+      outline: none !important;
+    }
+    .stMultiSelect div[data-baseweb="select"]:focus-within,
+    .stSelectbox  div[data-baseweb="select"]:focus-within {
+      border: none !important;
+      box-shadow: none !important;
       outline: none !important;
     }
 
