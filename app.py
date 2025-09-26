@@ -363,7 +363,7 @@ with c_i:
     issues_sel = st.multiselect("号（複数選択）", iss_candidates, default=[])
 
 # -------------------- 検索フィルタ（1段目：対象物 / 研究タイプ） --------------------
-st.subheader("検索フィルタ")
+#st.subheader("検索フィルタ")
 
 row1_tg, row1_tp = st.columns([1.2, 1.2])
 
