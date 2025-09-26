@@ -102,15 +102,13 @@ def build_author_candidates(df: pd.DataFrame):
                 rep[k] = name
     return [rep[k] for k in sorted(rep.keys())]
 
-def haystack(row, include_fulltext: bool):
+def haystack(row):
     parts = [
         str(row.get("論文タイトル","")),
         str(row.get("著者","")),
         str(row.get("file_name","")),
         " ".join(str(row.get(c,"")) for c in KEY_COLS if c in row),
     ]
-    if include_fulltext and "pdf_text" in row:
-        parts.append(str(row.get("pdf_text","")))
     return norm_key(" \n ".join(parts))
 
 def to_int_or_none(x):
@@ -300,13 +298,11 @@ with c_tp:
     types_sel = st.multiselect("研究タイプ（複数選択／部分一致）", types_all, default=[])
 
 # -------------------- キーワード検索 --------------------
-c_kw1, c_kw2, c_kw3 = st.columns([3, 1, 1])
+c_kw1, c_kw2 = st.columns([3, 1])
 with c_kw1:
     kw_query = st.text_input("キーワード（空白/カンマで複数可）", value="")
 with c_kw2:
     kw_mode = st.radio("一致条件", ["OR", "AND"], index=0, horizontal=True, key="kw_mode")
-with c_kw3:
-    include_fulltext = st.checkbox("本文も検索（pdf_text）", value=True)
 
 # -------------------- フィルタ適用 --------------------
 def apply_filters(_df: pd.DataFrame) -> pd.DataFrame:
@@ -331,7 +327,7 @@ def apply_filters(_df: pd.DataFrame) -> pd.DataFrame:
     toks = tokens_from_query(kw_query)
     if toks:
         def hit_kw(row):
-            hs = haystack(row, include_fulltext=include_fulltext)
+            hs = haystack(row)
             return all(t in hs for t in toks) if kw_mode == "AND" else any(t in hs for t in toks)
         df2 = df2[df2.apply(hit_kw, axis=1)]
     return df2
