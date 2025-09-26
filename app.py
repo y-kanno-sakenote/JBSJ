@@ -342,7 +342,7 @@ if sum_df is not None:
     df = df.merge(sum_df, on="file_name", how="left")
 
 # -------------------- 年・巻・号フィルタ --------------------
-st.subheader("年・巻・号フィルタ")
+st.subheader("検索フィルタ")
 year_vals = pd.to_numeric(df.get("発行年", pd.Series(dtype=str)), errors="coerce")
 if year_vals.notna().any():
     ymin_all, ymax_all = int(year_vals.min()), int(year_vals.max())
