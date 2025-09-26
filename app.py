@@ -110,6 +110,17 @@ st.markdown(
     ul[role="listbox"]::-webkit-scrollbar-thumb:hover {
       background: #333;
     }
+/* あかさたなボタンを小さくする */
+    div[data-testid="stHorizontalBlock"] button {
+      padding: 2px 6px !important;
+      font-size: 0.75rem !important;
+      height: auto !important;
+      min-height: 0 !important;
+      line-height: 1.2 !important;
+      margin: 0 2px !important;
+      border-radius: 4px !important;
+    }
+
     </style>
     """,
     unsafe_allow_html=True
