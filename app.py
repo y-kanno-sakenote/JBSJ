@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-論文検索（統一UI版：お気に入りにタグを“表で直接入力”＋ summary追加）
+論文検索（統一UI版：お気に入りにタグを“表で直接入力”）
 
 機能:
 - 発行年レンジ、巻・号（複数選択）、著者（正規化・複数選択）、対象物/研究タイプ（部分一致・複数選択）
 - キーワード AND/OR 検索（空白/カンマ区切り、pdf_text を含めるか選択可能）
-- 検索結果テーブル（不要列の非表示、HP/PDF のリンク化、★でお気に入り、summary列追加）
+- 検索結果テーブル（不要列の非表示、HP/PDF のリンク化、★でお気に入り）
 - お気に入り一覧（常設・★で解除/追加）
 - お気に入りタグ付け：お気に入り表の「tags」列を直接編集（カンマ/空白区切り）
 - 「❌ 全て外す」ボタンでお気に入り一括解除
@@ -75,17 +75,20 @@ def ensure_cols(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def consolidate_authors_column(df: pd.DataFrame) -> pd.DataFrame:
+    """著者列：空白では分割せず、区切り記号のみで分割→同名異表記を代表表記に統合"""
     if "著者" not in df.columns:
         return df
     df = df.copy()
     def unify(cell: str) -> str:
         names = split_authors(cell)
-        seen, result = set(), []
+        seen = set()
+        result = []
         for n in names:
             k = norm_key(n)
-            if k and k not in seen:
-                seen.add(k)
-                result.append(n)
+            if not k or k in seen:
+                continue
+            seen.add(k)
+            result.append(n)
         return ", ".join(result)
     df["著者"] = df["著者"].astype(str).apply(unify)
     return df
@@ -117,14 +120,19 @@ def to_int_or_none(x):
         return int(m.group()) if m else None
 
 def order_by_template(values, template):
+    """1) テンプレの順 2) 未収載はアルファ順 3) その他は最後"""
     vs = list(dict.fromkeys(values))
     tmpl_set = set(template)
     head = [v for v in template if v in vs and "その他" not in v]
     mid  = sorted([v for v in vs if v not in tmpl_set and "その他" not in v])
-    tail = [v for v in template if v in vs and "その他" in v] + [v for v in vs if ("その他" in v and v not in template)]
+    tail = [v for v in template if v in vs and "その他" in v] + \
+           [v for v in vs if ("その他" in v and v not in template)]
     return head + mid + tail
 
 def make_visible_cols(df: pd.DataFrame) -> list[str]:
+    """df の列から『相対PASS/終了ページ/file_path/num_pages/file_name』と
+       『llm_keywords 以降の全列』を非表示対象にして、表示列リストを返す。
+    """
     base_hide = {"相対PASS", "終了ページ", "file_path", "num_pages", "file_name"}
     cols = [str(c) for c in df.columns]
     hide = set(c for c in cols if c in base_hide)
@@ -144,9 +152,11 @@ def make_row_id(row):
 # -------------------- データ読み込み --------------------
 st.title("醸造協会誌　論文検索")
 
-DEMO_CSV_PATH = Path("data/keywords_summary4.csv")
-SUMMARY_CSV_PATH = Path("data/summaries.csv")
-SECRET_URL = st.secrets.get("GSHEET_CSV_URL", "")
+DEMO_CSV_PATH = Path("data/keywords_summary4.csv")   # メインCSV
+SUMMARY_CSV_PATH = Path("data/summaries.csv")         # ← 追加: summary
+AUTHORS_CSV_PATH = Path("data/authors_readings.csv")  # ← 追加: 著者読み
+
+SECRET_URL = st.secrets.get("GSHEET_CSV_URL", "")  # （任意）Secretsに入れておけば自動使用
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_local_csv(path: Path) -> pd.DataFrame:
@@ -156,11 +166,12 @@ def load_local_csv(path: Path) -> pd.DataFrame:
 def load_url_csv(url: str) -> pd.DataFrame:
     return ensure_cols(fetch_csv(url))
 
+# --- 追加：summaries.csv ローダ ---
 @st.cache_data(ttl=600, show_spinner=False)
 def load_summaries(path: Path) -> pd.DataFrame | None:
-    if not path.exists():
-        return None
     try:
+        if not path.exists():
+            return None
         df_s = pd.read_csv(path, encoding="utf-8")
         df_s.columns = [str(c).strip() for c in df_s.columns]
         if not {"file_name", "summary"}.issubset(df_s.columns):
@@ -169,35 +180,72 @@ def load_summaries(path: Path) -> pd.DataFrame | None:
     except Exception:
         return None
 
-# --- CSV読み込み ---
+# --- 追加：authors_readings.csv ローダ ---
+@st.cache_data(ttl=600, show_spinner=False)
+def load_authors_readings(path: Path) -> pd.DataFrame | None:
+    try:
+        if not path.exists():
+            return None
+        adf = pd.read_csv(path, encoding="utf-8")
+        adf.columns = [str(c).strip() for c in adf.columns]
+        if not {"author", "reading"}.issubset(adf.columns):
+            return None
+        adf["author"]  = adf["author"].astype(str).str.strip()
+        adf["reading"] = adf["reading"].astype(str).str.strip()
+        adf = adf[(adf["author"]!="") & (adf["reading"]!="")]
+        # 同じ reading が複数ある場合は先勝ち
+        adf = adf.drop_duplicates(subset=["reading"], keep="first")
+        return adf
+    except Exception:
+        return None
+
 with st.sidebar:
     st.header("データ読み込み")
-    use_demo = st.toggle("デモCSVを自動ロードする", value=True)
-    url = st.text_input("公開CSVのURL", value=SECRET_URL)
-    up  = st.file_uploader("CSVをローカルから読み込み", type=["csv"])
-    load_clicked = st.button("読み込み", type="primary")
+    st.caption("※ まずはデモ用CSVを自動ロード。URL/ファイル指定で上書きできます。")
 
-df, err = None, None
+    # デモ自動ロードのON/OFF（デフォルトON）
+    use_demo = st.toggle("デモCSVを自動ロードする", value=True, help="data/demo.csv を読み込みます。")
+
+    # 上書き手段：URL or ファイル
+    url = st.text_input("公開CSVのURL（Googleスプレッドシート output=csv）", value=SECRET_URL)
+    up  = st.file_uploader("CSVをローカルから読み込み", type=["csv"])
+
+    # 明示ボタン：読み込み（URL/ファイルの優先度は「アップロード > URL」）
+    load_clicked = st.button("読み込み（URL/ファイルを優先）", type="primary", key="load_btn")
+
+# 優先順位: 1) クリックでURL/ファイル 2) デモ自動 3) 最後の手段：待機
+df = None
+err = None
+
 try:
     if load_clicked:
         if up is not None:
             df = ensure_cols(pd.read_csv(up, encoding="utf-8"))
+            st.toast("ローカルCSVを読み込みました")
         elif url.strip():
             df = load_url_csv(url.strip())
+            st.toast("URLのCSVを読み込みました")
+        else:
+            st.warning("URL または CSV を指定してください。")
     elif use_demo and DEMO_CSV_PATH.exists():
         df = load_local_csv(DEMO_CSV_PATH)
+        st.caption(f"✅ デモCSVを自動ロード中: {DEMO_CSV_PATH}")
     elif SECRET_URL:
         df = load_url_csv(SECRET_URL)
+        st.caption("✅ SecretsのURLから自動ロード中")
 except Exception as e:
     err = e
 
 if df is None:
+    if err:
+        st.error(f"読み込みエラー: {err}")
+    st.info("左のサイドバーで CSV を指定するか、デモCSVを有効にしてください。")
     st.stop()
 
-# --- summaries.csv をマージ ---
-summaries_df = load_summaries(SUMMARY_CSV_PATH)
-if summaries_df is not None:
-    df = df.merge(summaries_df, on="file_name", how="left")
+# --- 追加：summary をマージ ---
+sum_df = load_summaries(SUMMARY_CSV_PATH)
+if sum_df is not None:
+    df = df.merge(sum_df, on="file_name", how="left")
 
 # -------------------- 年・巻・号フィルタ --------------------
 st.subheader("年・巻・号フィルタ")
@@ -225,25 +273,22 @@ st.subheader("検索フィルタ")
 c_a, c_tg, c_tp = st.columns([1.2, 1.2, 1.2])
 
 with c_a:
-    # === ここだけ置き換え：著者オートコンプリート（読みで検索・表示は漢字） ===
+    # 著者（読みで検索・表示は漢字＋読み） ※既存UIを壊さず置換
     adf = load_authors_readings(AUTHORS_CSV_PATH)
     if adf is not None:
         reading2author = dict(zip(adf["reading"], adf["author"]))
         options_readings = sorted(reading2author.keys())
-        # 検索は options（=reading）に対して行われるので、表示に reading も含める
         authors_sel_readings = st.multiselect(
             "著者（読みで検索可 / 表示は漢字＋読み）",
             options=options_readings,
             format_func=lambda r: f"{reading2author.get(r, r)}｜{r}",
             placeholder="例：やまだ / さとう / たかはし ..."
         )
-        # 後段のフィルタは従来通り「著者（漢字）」で行いたいので、変換して authors_sel に入れる
         authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
     else:
         # フォールバック：従来の著者 multiselect
         authors_all = build_author_candidates(df)
         authors_sel = st.multiselect("著者", authors_all, default=[])
-    # === 置き換えここまで ===
 
 with c_tg:
     raw_targets = {t for v in df.get("対象物_top3", pd.Series(dtype=str)).fillna("") for t in split_multi(v)}
