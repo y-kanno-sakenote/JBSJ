@@ -387,15 +387,17 @@ with c_a:
     st.caption("著者の読み頭文字でサジェストを絞り込み")
 
     initials = ["すべて","あ","か","さ","た","な","は","ま","や","ら","わ","英字"]
+
+    # 既定値を一度だけセット（以後は radio の key 管理に任せる）
     if "author_initial" not in st.session_state:
         st.session_state.author_initial = "すべて"
 
-    st.session_state.author_initial = st.radio(
+    # index は指定しない（key があれば state を自動採用）
+    sel_ini = st.radio(
         "著者イニシャル選択",
-        initials,
+        options=initials,
         horizontal=True,
-        index=initials.index(st.session_state.author_initial) if st.session_state.author_initial in initials else 0,
-        key="author_initial_radio",
+        key="author_initial",
     )
 
     # authors_readings.csv を読み込み
@@ -403,7 +405,6 @@ with c_a:
     if adf is not None and not adf.empty:
         cand = adf.copy()
 
-        # --- ひらがな行テーブル（濁点・半濁点を行に含める）---
         GOJUON = {
             "あ": "あいうえお",
             "か": "かきくけこがぎぐげご",
@@ -417,83 +418,48 @@ with c_a:
             "わ": "わをん",
         }
 
-        # カタカナ→ひらがな（先頭文字だけ見ればOK）
         def kata_to_hira(s: str) -> str:
             out = []
-            for ch in str(s):
+            for ch in str(s or ""):
                 code = ord(ch)
-                if 0x30A1 <= code <= 0x30F6:  # ァ..ヶ
-                    out.append(chr(code - 0x60))  # カタカナ→ひらがな
-                else:
-                    out.append(ch)
+                out.append(chr(code - 0x60) if 0x30A1 <= code <= 0x30F6 else ch)
             return "".join(out)
 
         def hira_head(s: str) -> str | None:
             s = str(s or "")
-            if not s:
-                return None
-            h = kata_to_hira(s)[0]  # 先頭
-            return h
+            if not s: return None
+            return kata_to_hira(s)[0]
 
         def is_roman_head(s: str) -> bool:
             return bool(re.match(r"[A-Za-z]", str(s or "")))
 
         # --- ラジオ選択に応じたフィルタ ---
-        ini = st.session_state.author_initial
-        if ini == "英字":
-            mask = cand["reading"].astype(str).str.match(r"[A-Za-z]")
-            cand = cand[mask]
-        elif ini != "すべて":
-            allowed = set(GOJUON.get(ini, ""))
-            def in_row(s):
-                if not s or is_roman_head(s):
-                    return False  # 英字は除外
-                h = hira_head(s)
-                return bool(h and h in allowed)
-            cand = cand[cand["reading"].apply(in_row)]
+        if sel_ini == "英字":
+            cand = cand[cand["reading"].astype(str).str.match(r"[A-Za-z]")]
+        elif sel_ini != "すべて":
+            allowed = set(GOJUON.get(sel_ini, ""))
+            cand = cand[cand["reading"].apply(
+                lambda s: (not is_roman_head(s)) and (hira_head(s) in allowed)
+            )]
 
         # ===== 並べ替え: ひらがな → カタカナ → 英字 → その他 =====
-        # ひらがな・カタカナ・英字の判定
-        _re_hira = re.compile(r"^[\u3040-\u309F]")   # ひらがな
-        _re_kata = re.compile(r"^[\u30A0-\u30FF]")   # カタカナ
-        _re_roman = re.compile(r"^[A-Za-z]")         # 英字
+        _re_hira  = re.compile(r"^[\u3040-\u309F]")
+        _re_kata  = re.compile(r"^[\u30A0-\u30FF]")
+        _re_roman = re.compile(r"^[A-Za-z]")
 
-        # カタカナ→ひらがな（比較用）
-        def kata_to_hira(s: str) -> str:
-            out = []
-            for ch in str(s or ""):
-                code = ord(ch)
-                if 0x30A1 <= code <= 0x30F6:  # ァ..ヶ
-                    out.append(chr(code - 0x60))
-                else:
-                    out.append(ch)
-            return "".join(out)
-
-        # 並べ替えキーを作る
-        # group: 0=ひらがな, 1=カタカナ, 2=英字, 3=その他
         def sort_key(reading: str):
             r = str(reading or "")
-            if _re_hira.match(r):
-                # ひらがなはそのまま
-                return (0, r)
-            if _re_kata.match(r):
-                # カタカナは ひらがな化して比較（グループはカタカナとして 1）
-                return (1, kata_to_hira(r))
-            if _re_roman.match(r):
-                # 英字は最後の手前
-                return (2, r.lower())
-            # 記号などは最後
+            if _re_hira.match(r):  return (0, r)
+            if _re_kata.match(r):  return (1, kata_to_hira(r))
+            if _re_roman.match(r): return (2, r.lower())
             return (3, r)
 
-        # cand を「グループ→読みの比較キー」で安定ソート
         cand = cand.assign(
-            __sort_grp=cand["reading"].map(lambda s: sort_key(s)[0]),
-            __sort_key=cand["reading"].map(lambda s: sort_key(s)[1]),
-        ).sort_values(
-            by=["__sort_grp", "__sort_key"], kind="mergesort"
-        ).drop(columns=["__sort_grp", "__sort_key"]).reset_index(drop=True)
+            __g=cand["reading"].map(lambda s: sort_key(s)[0]),
+            __k=cand["reading"].map(lambda s: sort_key(s)[1]),
+        ).sort_values(by=["__g","__k"], kind="mergesort") \
+         .drop(columns=["__g","__k"]).reset_index(drop=True)
 
-        # multiselect の options は reading、表示は「漢字｜読み」
         reading2author = dict(zip(cand["reading"], cand["author"]))
         options_readings = list(reading2author.keys())
 
@@ -503,11 +469,8 @@ with c_a:
             format_func=lambda r: f"{reading2author.get(r, r)}｜{r}",
             placeholder="例：やまだ / さとう / たかはし ..."
         )
-
-        # 後段フィルタ用に漢字へ変換
         authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
     else:
-        # フォールバック
         authors_all = build_author_candidates(df)
         authors_sel = st.multiselect("著者", authors_all, default=[])
 
