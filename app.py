@@ -154,7 +154,8 @@ st.title("醸造協会誌　論文検索")
 from pathlib import Path
 
 DEMO_CSV_PATH = Path("data/keywords_summary4.csv")  # リポに同梱したテストCSV
-SECRET_URL = st.secrets.get("GSHEET_CSV_URL", "")  # （任意）Secretsに入れておけば自動使用
+SUMMARY_CSV_PATH = Path("data/summaries.csv")       # ← summary 追加用CSV
+SECRET_URL = st.secrets.get("GSHEET_CSV_URL", "")   # （任意）Secretsに入れておけば自動使用
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_local_csv(path: Path) -> pd.DataFrame:
@@ -163,6 +164,21 @@ def load_local_csv(path: Path) -> pd.DataFrame:
 @st.cache_data(ttl=600, show_spinner=False)
 def load_url_csv(url: str) -> pd.DataFrame:
     return ensure_cols(fetch_csv(url))
+
+# === 追加: summaries.csv ローダ ===
+@st.cache_data(ttl=600, show_spinner=False)
+def load_summaries(path: Path) -> pd.DataFrame | None:
+    if not path.exists():
+        return None
+    try:
+        df_s = pd.read_csv(path, encoding="utf-8")
+        df_s.columns = [str(c).strip() for c in df_s.columns]
+        if not {"file_name", "summary"}.issubset(df_s.columns):
+            return None
+        return df_s[["file_name", "summary"]]
+    except Exception:
+        return None
+# === 追加ここまで ===
 
 # === 追加: 著者読みCSVのローダ（authors_readings.csv） ===
 AUTHORS_CSV_PATH = Path("data/authors_readings.csv")
@@ -198,10 +214,9 @@ with st.sidebar:
     # 明示ボタン：読み込み（URL/ファイルの優先度は「アップロード > URL」）
     load_clicked = st.button("読み込み（URL/ファイルを優先）", type="primary", key="load_btn")
 
-# 優先順位: 1) クリックでURL/ファイル 2) デモ自動 3) 最後の手段：待機
+# 優先順位: 1) クリックでURL/ファイル 2) デモ自動 3) Secrets
 df = None
 err = None
-
 try:
     if load_clicked:
         if up is not None:
@@ -220,6 +235,12 @@ try:
         st.caption("✅ SecretsのURLから自動ロード中")
 except Exception as e:
     err = e
+
+# --- ここで summaries.csv をマージ ---
+if df is not None:
+    summaries_df = load_summaries(SUMMARY_CSV_PATH)
+    if summaries_df is not None:
+        df = df.merge(summaries_df, on="file_name", how="left")
 
 if df is None:
     if err:
