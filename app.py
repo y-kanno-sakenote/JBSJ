@@ -60,22 +60,17 @@ st.markdown(
     }
 
     /* --- フォーカス時のスタイル --- */
-    /* テキスト入力・NumberInput は青枠 */
     input:focus, textarea:focus,
     .stTextInput input:focus, .stNumberInput input:focus {
       border: 2px solid #1a73e8 !important;
       box-shadow: 0 0 4px #1a73e8 !important;
       outline: none !important;
     }
-
-    /* Select / MultiSelect 本体は青枠を維持 */
     .stMultiSelect div[data-baseweb="select"]:focus-within,
     .stSelectbox  div[data-baseweb="select"]:focus-within {
       border: 2px solid #1a73e8 !important;
       box-shadow: 0 0 4px #1a73e8 !important;
     }
-
-    /* プルダウン内部の検索入力欄は青枠を消す */
     .stMultiSelect input:focus,
     .stSelectbox  input:focus {
       border: none !important;
@@ -87,11 +82,32 @@ st.markdown(
     ul[role="listbox"] {
       background: #f5f5f5 !important;
       border: 1px solid #666 !important;
+      max-height: 280px !important;   /* ▼ 高さ制限して内部スクロール */
+      overflow-y: auto !important;
+      scrollbar-width: thin;           /* Firefox */
+      scrollbar-color: #888 #eee;      /* Firefox */
     }
     li[role="option"]:hover,
     li[role="option"][aria-selected="true"] {
       background: #e0e0e0 !important;
       color: #000 !important;
+    }
+
+    /* WebKit 系（Chrome/Edge/Safari）のスクロールバー */
+    ul[role="listbox"]::-webkit-scrollbar {
+      width: 10px;
+    }
+    ul[role="listbox"]::-webkit-scrollbar-track {
+      background: #eee;
+      border-radius: 6px;
+    }
+    ul[role="listbox"]::-webkit-scrollbar-thumb {
+      background: #888;
+      border-radius: 6px;
+      border: 2px solid #eee;
+    }
+    ul[role="listbox"]::-webkit-scrollbar-thumb:hover {
+      background: #666;
     }
     </style>
     """,
