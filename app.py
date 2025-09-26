@@ -480,6 +480,15 @@ with c_a:
         st.markdown("##### 著者")
         authors_all = build_author_candidates(df)
         authors_sel = st.multiselect("著者", authors_all, default=[])
+
+# --- 著者・対象物・研究タイプフィルタ UI の直後あたりに追加 ---
+if 'authors_sel' not in locals():
+    authors_sel = []
+if 'targets_sel' not in locals():
+    targets_sel = []
+if 'types_sel' not in locals():
+    types_sel = []
+
 # -------------------- キーワード検索 --------------------
 c_kw1, c_kw2 = st.columns([3, 1])
 with c_kw1:
