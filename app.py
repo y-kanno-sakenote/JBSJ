@@ -25,44 +25,69 @@ st.set_page_config(page_title="論文検索（統一UI版）", layout="wide")
 st.markdown(
     """
     <style>
-    /* 入力欄の背景だけ濃いグレーにする */
+    /* ========= 共通：入力枠のトーン ========== */
     input, textarea, select {
-        background-color: #e0e0e0 !important;  /* ←ここを濃く */
-        color: #000000 !important;
-        border: 1px solid #666 !important;
-        border-radius: 6px !important;
-        padding: 4px 8px !important;
+      background-color: #e0e0e0 !important;
+      color: #000 !important;
+      border: 1px solid #666 !important;
+      border-radius: 6px !important;
+      padding: 4px 8px !important;
     }
-
-    /* Streamlit の text_input / number_input */
     .stTextInput input, .stNumberInput input {
-        background-color: #e0e0e0 !important;
-        color: #000000 !important;
-        border: 1px solid #666 !important;
+      background-color: #e0e0e0 !important;
+      color: #000 !important;
+      border: 1px solid #666 !important;
     }
 
-    /* multiselect の外枠 */
-    .stMultiSelect div[data-baseweb="select"] {
-        background-color: #e0e0e0 !important;
-        color: #000000 !important;
-        border: 1px solid #666 !important;
+    /* ========= Select / MultiSelect を統一 ========== */
+    /* 外枠（見える枠）はここ */
+    .stMultiSelect div[data-baseweb="select"],
+    .stSelectbox  div[data-baseweb="select"]{
+      background-color: #e0e0e0 !important;
+      border: 1px solid #666 !important;
+      border-radius: 6px !important;
+    }
+    /* 内側の“二重枠”を消して段差感をなくす */
+    div[data-baseweb="select"] > div {
+      border: none !important;
+      background: transparent !important;
+    }
+    /* テキスト/プレースホルダ/選択済みの色 */
+    div[data-baseweb="select"] span {
+      color: #000 !important;
+    }
+    /* チェブロン/×アイコンの色 */
+    div[data-baseweb="select"] svg {
+      color: #000 !important;
+      fill: #000 !important;
+    }
+    /* MultiSelect のタグ（選択済みピル） */
+    div[data-baseweb="tag"] {
+      background: #d5d5d5 !important;
+      color: #000 !important;
+      border: 1px solid #666 !important;
+      border-radius: 12px !important;
     }
 
-    /* selectbox */
-    .stSelectbox div[data-baseweb="select"] {
-        background-color: #e0e0e0 !important;
-        color: #000000 !important;
-        border: 1px solid #666 !important;
-    }
-
-    /* フォーカス時 */
+    /* フォーカス時の見た目を統一（青のアウトライン） */
     input:focus, textarea:focus, select:focus,
     .stTextInput input:focus, .stNumberInput input:focus,
     .stMultiSelect div[data-baseweb="select"]:focus-within,
-    .stSelectbox div[data-baseweb="select"]:focus-within {
-        border: 2px solid #1a73e8 !important;
-        box-shadow: 0 0 4px #1a73e8 !important;
-        outline: none !important;
+    .stSelectbox  div[data-baseweb="select"]:focus-within {
+      border: 2px solid #1a73e8 !important;
+      box-shadow: 0 0 4px #1a73e8 !important;
+      outline: none !important;
+    }
+
+    /* ドロップダウンメニュー側も同トーンに */
+    ul[role="listbox"] {
+      background: #f5f5f5 !important;
+      border: 1px solid #666 !important;
+    }
+    li[role="option"]:hover,
+    li[role="option"][aria-selected="true"] {
+      background: #e0e0e0 !important;
+      color: #000 !important;
     }
     </style>
     """,
