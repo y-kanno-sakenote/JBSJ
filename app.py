@@ -378,29 +378,31 @@ with row1_tp:
     types_sel = st.multiselect("研究タイプ（複数選択／部分一致）", types_all, default=[])
 
 # -------------------- 検索フィルタ（2段目：著者 + イニシャルラジオ横並び） --------------------
-row2_author, row2_radio = st.columns([1.6, 1.2])
+row2_author, row2_radio = st.columns([1.0, 2.0])   # ← 著者欄を短めにしてラジオに幅を多めに
+
+with row2_author:
+    st.caption("著者の読みで検索（表示は漢字｜読み）")
 
 with row2_radio:
     initials = ["すべて","あ","か","さ","た","な","は","ま","や","ら","わ","英字"]
     if "author_initial" not in st.session_state:
         st.session_state.author_initial = "すべて"
-    # 横並びラジオ（ここで選択だけ先に受ける）
     selected_initial = st.radio(
         "著者イニシャル選択",
         initials,
-        horizontal=True,
+        horizontal=True,   # ← 横一列に並べる
         index=initials.index(st.session_state.author_initial) if st.session_state.author_initial in initials else 0,
         key="author_initial_radio",
     )
     st.session_state.author_initial = selected_initial
 
-# authors_readings.csv を読み込み → ラジオに応じて候補を絞ってから multiselect を出す
+# authors_readings.csv を読み込み
 with row2_author:
     adf = load_authors_readings(AUTHORS_CSV_PATH)
     if adf is not None and not adf.empty:
         cand = adf.copy()
 
-        # ひらがな行（濁点・半濁点含む）
+        # --- （以下は従来と同じフィルタ＆並び替え処理）---
         GOJUON = {
             "あ": "あいうえお",
             "か": "かきくけこがぎぐげご",
@@ -418,7 +420,7 @@ with row2_author:
             out = []
             for ch in str(s or ""):
                 o = ord(ch)
-                if 0x30A1 <= o <= 0x30F6:  # カタカナ -> ひらがな
+                if 0x30A1 <= o <= 0x30F6:
                     out.append(chr(o - 0x60))
                 else:
                     out.append(ch)
@@ -426,41 +428,29 @@ with row2_author:
 
         def hira_head(s: str) -> str | None:
             s = str(s or "")
-            if not s:
-                return None
-            return kata_to_hira(s)[0]
+            return kata_to_hira(s)[0] if s else None
 
         def is_roman_head(s: str) -> bool:
             return bool(re.match(r"[A-Za-z]", str(s or "")))
 
-        # ラジオに応じて候補を絞る
         ini = st.session_state.author_initial
         if ini == "英字":
             cand = cand[cand["reading"].astype(str).str.match(r"[A-Za-z]")]
         elif ini != "すべて":
             allowed = set(GOJUON.get(ini, ""))
-            def in_row(s):
-                if not s or is_roman_head(s):
-                    return False
-                h = hira_head(s)
-                return bool(h and h in allowed)
-            cand = cand[cand["reading"].apply(in_row)]
+            cand = cand[cand["reading"].apply(
+                lambda s: (not is_roman_head(s)) and (hira_head(s) in allowed if hira_head(s) else False)
+            )]
 
-        # 並び順：ひらがな行順 → カタカナ → 英字
+        # 並び順
         AIUEO_ORDER = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん"
-
         def sort_tuple(reading: str):
-            if not reading:
-                return (3, 999, "")
+            if not reading: return (3, 999, "")
             ch = reading[0]
-            if re.match(r"[A-Za-z]", ch):
-                return (2, 999, ch.lower())  # 英字最後
-            if re.match(r"[\u30A0-\u30FF]", ch):
-                return (1, 999, reading)     # カタカナ中間
+            if re.match(r"[A-Za-z]", ch): return (2, 999, ch.lower())
+            if re.match(r"[\u30A0-\u30FF]", ch): return (1, 999, reading)
             idx = AIUEO_ORDER.find(ch)
-            if idx == -1:
-                idx = 998
-            return (0, idx, reading)         # ひらがな先頭（行順）
+            return (0, idx if idx != -1 else 998, reading)
 
         cand = cand.assign(
             _grp=[sort_tuple(r)[0] for r in cand["reading"]],
@@ -479,7 +469,6 @@ with row2_author:
         )
         authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
     else:
-        # フォールバック：著者列から候補生成
         authors_all = build_author_candidates(df)
         authors_sel = st.multiselect("著者", authors_all, default=[])
 
