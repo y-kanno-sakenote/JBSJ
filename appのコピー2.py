@@ -110,6 +110,17 @@ st.markdown(
     ul[role="listbox"]::-webkit-scrollbar-thumb:hover {
       background: #333;
     }
+/* あかさたなボタンを小さくする */
+    div[data-testid="stHorizontalBlock"] button {
+      padding: 2px 6px !important;
+      font-size: 0.75rem !important;
+      height: auto !important;
+      min-height: 0 !important;
+      line-height: 1.2 !important;
+      margin: 0 2px !important;
+      border-radius: 4px !important;
+    }
+
     </style>
     """,
     unsafe_allow_html=True
@@ -364,36 +375,35 @@ with c_i:
 
 # -------------------- 著者・対象物・研究タイプフィルタ --------------------
 st.subheader("検索フィルタ")
-c_a, c_tg, c_tp = st.columns([1.2, 1.2, 1.2])
 
-with c_a:
-    # 著者（読みで検索・表示は漢字＋読み）
-    adf = load_authors_readings(AUTHORS_CSV_PATH)
-    if adf is not None:
-        reading2author = dict(zip(adf["reading"], adf["author"]))
+# ひらがな/カタカナの先頭文字 → 五十音行を返す（英字は EN）
+def _kana_head_to_row(ch: str) -> str:
+    if not ch:
+        return "その他"
+    o = ord(ch)
+    # カタカナ → ひらがなへ変換（U+30A1..U+30F4 -> -0x60）
+    if 0x30A1 <= o <= 0x30F4:
+        ch = chr(o - 0x60)
+        o = ord(ch)
+    if 0x3041 <= o <= 0x3096:  # ひらがな
+        if   ch in "あいうえお": return "あ"
+        elif ch in "かきくけこがぎぐげご": return "か"
+        elif ch in "さしすせそざじずぜぞ": return "さ"
+        elif ch in "たちつてとだぢづでど": return "た"
+        elif ch in "なにぬねの": return "な"
+        elif ch in "はひふへほばびぶべぼぱぴぷぺぽ": return "は"
+        elif ch in "まみむめも": return "ま"
+        elif ch in "やゆよ": return "や"
+        elif ch in "らりるれろ": return "ら"
+        elif ch in "わをん": return "わ"
+        else: return "その他"
+    # 英字
+    if ("A" <= ch <= "Z") or ("a" <= ch <= "z"):
+        return "EN"
+    return "その他"
 
-        def is_katakana_or_english(name: str) -> bool:
-            if re.match(r"^[A-Za-z]", name):
-                return True  # 英語
-            if re.match(r"^[\u30A0-\u30FF]", name):
-                return True  # カタカナ
-            return False
-
-        # --- 並び替え: 日本語（漢字/ひらがな）→ カタカナ・英語 ---
-        jp_readings = [r for r, a in reading2author.items() if not is_katakana_or_english(a)]
-        other_readings = [r for r, a in reading2author.items() if is_katakana_or_english(a)]
-        options_readings = sorted(jp_readings) + sorted(other_readings)
-
-        authors_sel_readings = st.multiselect(
-            "著者（読みで検索可 / 表示は漢字＋読み）",
-            options=options_readings,
-            format_func=lambda r: f"{reading2author.get(r, r)}｜{r}",
-            placeholder="例：やまだ / さとう / たかはし ..."
-        )
-        authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
-    else:
-        authors_all = build_author_candidates(df)
-        authors_sel = st.multiselect("著者", authors_all, default=[])
+# 3カラム：対象物 → 研究タイプ → 著者（この順）
+c_tg, c_tp, c_a = st.columns([1.2, 1.2, 1.2])
 
 with c_tg:
     raw_targets = {t for v in df.get("対象物_top3", pd.Series(dtype=str)).fillna("") for t in split_multi(v)}
@@ -404,7 +414,59 @@ with c_tp:
     raw_types = {t for v in df.get("研究タイプ_top3", pd.Series(dtype=str)).fillna("") for t in split_multi(v)}
     types_all = order_by_template(list(raw_types), TYPE_ORDER)
     types_sel = st.multiselect("研究タイプ（複数選択／部分一致）", types_all, default=[])
-# -------------------- キーワード検索 --------------------
+
+with c_a:
+    adf = load_authors_readings(AUTHORS_CSV_PATH)
+    if adf is not None and not adf.empty:
+        def _author_kind(a: str) -> int:
+            if re.fullmatch(r"[A-Za-z .,'-]+", a or ""):
+                return 2
+            return 1 if a and (0x30A0 <= ord(a[0]) <= 0x30FF) else 0
+
+        adf = adf.copy()
+        adf["author"] = adf["author"].astype(str).str.strip()
+        adf["reading"] = adf["reading"].astype(str).str.strip()
+        adf = adf.sort_values(by=["author"], key=lambda s: s.map(_author_kind)).drop_duplicates(subset=["reading"])
+        reading2author = dict(zip(adf["reading"], adf["author"]))
+
+        # --- まず multiselect 本体 ---
+        authors_sel_readings = st.multiselect(
+            "著者（読みで検索可 / 表示は漢字＋読み）",
+            options=sorted(reading2author.keys()),
+            format_func=lambda r: f"{reading2author.get(r, r)}｜{r}",
+            placeholder="例：やまだ / さとう / たかはし ..."
+        )
+        authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
+
+        # --- 次に五十音/英字ボタンを multiselect の下に並べる ---
+        rows = ["すべて", "あ","か","さ","た","な","は","ま","や","ら","わ","A–Z"]
+        col_btns = st.columns(len(rows))
+        if "author_row_sel" not in st.session_state:
+            st.session_state.author_row_sel = "すべて"
+        for i, lab in enumerate(rows):
+            if col_btns[i].button(lab, key=f"author_row_btn_{lab}"):
+                st.session_state.author_row_sel = lab
+
+        # 選択行に応じて候補を再構築（options を更新）
+        if st.session_state.author_row_sel == "すべて":
+            pass  # 全部
+        elif st.session_state.author_row_sel == "A–Z":
+            en_authors = {a for a in adf["author"].tolist() if re.fullmatch(r"[A-Za-z .,'-]+", a or "")}
+            options_readings = [r for r, a in reading2author.items() if a in en_authors]
+            st.info(f"A–Zで絞り込み候補数: {len(options_readings)}")
+        else:
+            want = st.session_state.author_row_sel
+            options_readings = []
+            for r in reading2author.keys():
+                head = r[:1]
+                if _kana_head_to_row(head) == want:
+                    options_readings.append(r)
+            st.info(f"{want}行で絞り込み候補数: {len(options_readings)}")
+    else:
+        authors_all = build_author_candidates(df)
+        authors_sel = st.multiselect("著者", authors_all, default=[])
+
+# -------------------- キーワード検索（著者ブロックの“下段・左寄せ”） --------------------
 c_kw1, c_kw2 = st.columns([3, 1])
 with c_kw1:
     kw_query = st.text_input("キーワード（空白/カンマで複数可）", value="")
