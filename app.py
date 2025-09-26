@@ -349,15 +349,22 @@ st.subheader("検索フィルタ")
 c_a, c_tg, c_tp = st.columns([1.2, 1.2, 1.2])
 
 with c_a:
-    # 著者（読みで検索・表示は漢字＋読み） ※既存UIを壊さず置換
+    # 著者（読みで検索・表示は漢字＋読み）
     adf = load_authors_readings(AUTHORS_CSV_PATH)
     if adf is not None:
         reading2author = dict(zip(adf["reading"], adf["author"]))
 
-        # --- 並び替え: 日本語 -> 英語 ---
-        jp_readings = [r for r, a in reading2author.items() if not re.match(r"^[A-Za-z]", a)]
-        en_readings = [r for r, a in reading2author.items() if re.match(r"^[A-Za-z]", a)]
-        options_readings = sorted(jp_readings) + sorted(en_readings)
+        def is_katakana_or_english(name: str) -> bool:
+            if re.match(r"^[A-Za-z]", name):
+                return True  # 英語
+            if re.match(r"^[\u30A0-\u30FF]", name):
+                return True  # カタカナ
+            return False
+
+        # --- 並び替え: 日本語（漢字/ひらがな）→ カタカナ・英語 ---
+        jp_readings = [r for r, a in reading2author.items() if not is_katakana_or_english(a)]
+        other_readings = [r for r, a in reading2author.items() if is_katakana_or_english(a)]
+        options_readings = sorted(jp_readings) + sorted(other_readings)
 
         authors_sel_readings = st.multiselect(
             "著者（読みで検索可 / 表示は漢字＋読み）",
@@ -367,7 +374,6 @@ with c_a:
         )
         authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
     else:
-        # フォールバック：従来の著者 multiselect
         authors_all = build_author_candidates(df)
         authors_sel = st.multiselect("著者", authors_all, default=[])
 
