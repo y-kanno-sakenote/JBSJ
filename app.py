@@ -228,7 +228,7 @@ def make_row_id(row):
 # -------------------- データ読み込み --------------------
 st.title("醸造協会誌　論文検索")
 
-DEMO_CSV_PATH = Path("data/keywords_summary4.csv")   # メインCSV
+DEMO_CSV_PATH = Path("data/keywords_summary5.csv")   # メインCSV
 SUMMARY_CSV_PATH = Path("data/summaries.csv")         # ← 追加: summary
 AUTHORS_CSV_PATH = Path("data/authors_readings.csv")  # ← 追加: 著者読み
 
