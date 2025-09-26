@@ -21,7 +21,7 @@ from pathlib import Path
 st.set_page_config(page_title="論文検索（統一UI版）", layout="wide")
 
 
-# -------------------- コントラスト（著者ドロップダウン強化版：丸い固定サム） --------------------
+# -------------------- コントラスト（著者ドロップダウン強化版） --------------------
 st.markdown(
     """
     <style>
@@ -75,13 +75,14 @@ st.markdown(
     ul[role="listbox"] {
       background: #f5f5f5 !important;
       border: 1px solid #666 !important;
-      max-height: 70vh !important;
-      min-height: 360px !important;
+      max-height: 70vh !important;     /* 画面の7割まで高く */
+      min-height: 360px !important;     /* 低解像度でも十分な高さを確保 */
       overflow-y: auto !important;
-      padding-right: 6px !important;
-      scrollbar-width: auto;            /* Firefox */
-      scrollbar-color: #555 #e9e9e9;    /* Firefox */
+      padding-right: 6px !important;    /* スクロールバーぶんの余白 */
+      scrollbar-width: auto;            /* Firefox: 太め */
+      scrollbar-color: #555 #e9e9e9;    /* Firefox: コントラスト強め */
     }
+    /* 候補1行を少し高く＝当たり判定を大きくして選びやすく */
     li[role="option"] {
       padding: 8px 12px !important;
       line-height: 1.4 !important;
@@ -93,8 +94,10 @@ st.markdown(
       color: #000 !important;
     }
 
-    /* WebKit 系の標準スクロール（他ドロップダウン用） */
-    ul[role="listbox"]::-webkit-scrollbar { width: 16px; }
+    /* WebKit 系（Chrome/Edge/Safari）のスクロールバーを太く＆高コントラストに */
+    ul[role="listbox"]::-webkit-scrollbar {
+      width: 16px;                      /* ← 太くする */
+    }
     ul[role="listbox"]::-webkit-scrollbar-track {
       background: #e9e9e9;
       border-radius: 8px;
@@ -102,31 +105,15 @@ st.markdown(
     ul[role="listbox"]::-webkit-scrollbar-thumb {
       background: #555;
       border-radius: 8px;
-      border: 3px solid #e9e9e9;
+      border: 3px solid #e9e9e9;        /* 外側に余白をとって“太く見せる” */
     }
-    ul[role="listbox"]::-webkit-scrollbar-thumb:hover { background: #333; }
-
-    /* ======== 著者ドロップダウン専用：丸い固定ハンドル ======== */
-    /* ラベルに「著者」を含む候補リストだけ上書き */
-    ul[role="listbox"][aria-label*="著者"]::-webkit-scrollbar { width: 18px !important; }
-    ul[role="listbox"][aria-label*="著者"]::-webkit-scrollbar-track {
-      background: #e9e9e9 !important;
-      border-radius: 9px !important;
-    }
-    ul[role="listbox"][aria-label*="著者"]::-webkit-scrollbar-thumb {
-      background: #555 !important;
-      border-radius: 999px !important;   /* 完全な丸 */
-      border: 4px solid #e9e9e9 !important;
-      height: 40px !important;           /* 固定サイズ */
-      min-height: 40px !important;
-      max-height: 40px !important;
-    }
-    ul[role="listbox"][aria-label*="著者"]::-webkit-scrollbar-thumb:hover {
-      background: #333 !important;
+    ul[role="listbox"]::-webkit-scrollbar-thumb:hover {
+      background: #333;
     }
     </style>
     """,
     unsafe_allow_html=True
+
 )
 
 # -------------------- 定数 --------------------
