@@ -361,125 +361,89 @@ with c_v:
 with c_i:
     iss_candidates = sorted({v for v in (df.get("号数", pd.Series(dtype=str)).map(to_int_or_none)).dropna().unique()})
     issues_sel = st.multiselect("号（複数選択）", iss_candidates, default=[])
-
 # -------------------- 著者・対象物・研究タイプフィルタ --------------------
 st.subheader("検索フィルタ")
-c_a, c_tg, c_tp = st.columns([1.2, 1.2, 1.2])
 
+# 3列（対象物 / 研究タイプ / 著者）
+c_tg, c_tp, c_a = st.columns([1.2, 1.2, 1.2])
+
+# --- 対象物（top3から候補生成）---
+with c_tg:
+    raw_targets = {t for v in df.get("対象物_top3", pd.Series(dtype=str)).fillna("")
+                   for t in split_multi(v)}
+    targets_all = order_by_template(list(raw_targets), TARGET_ORDER)
+    targets_sel = st.multiselect("対象物（複数選択／部分一致）", targets_all, default=[])
+
+# --- 研究タイプ（top3から候補生成）---
+with c_tp:
+    raw_types = {t for v in df.get("研究タイプ_top3", pd.Series(dtype=str)).fillna("")
+                 for t in split_multi(v)}
+    types_all = order_by_template(list(raw_types), TYPE_ORDER)
+    types_sel = st.multiselect("研究タイプ（複数選択／部分一致）", types_all, default=[])
+
+# --- 著者（あかさたなボタン → オートコンプリート）---
 with c_a:
-    # ================= あかさたなボタン + 読みオートコンプリート（表示は漢字） =================
-    import re
+    st.caption("著者の読み頭文字でサジェストを絞り込み")
+    initials = ["あ","か","さ","た","な","は","ま","や","ら","わ","英字"]
+    # セッション保持（未定義時の初期化）
+    if "author_initial" not in st.session_state:
+        st.session_state.author_initial = "あ"
 
-    # かな→ひらがな（1文字）
-    def _kata2hira_char(c: str) -> str:
-        oc = ord(c)
-        return chr(oc - 0x60) if 0x30A1 <= oc <= 0x30F6 else c
+    # 横並びの小ボタン
+    btn_cols = st.columns(len(initials))
+    for i, ini in enumerate(initials):
+        if btn_cols[i].button(ini, key=f"ini_{ini}", use_container_width=True):
+            st.session_state.author_initial = ini
 
-    GOJUON = {
-        "あ": "あいうえお",
-        "か": "かきくけこがぎぐげご",
-        "さ": "さしすせそざじずぜぞ",
-        "た": "たちつてとだぢづでど",
-        "な": "なにぬねの",
-        "は": "はひふへほばびぶべぼぱぴぷぺぽ",
-        "ま": "まみむめも",
-        "や": "やゆよ",
-        "ら": "らりるれろ",
-        "わ": "わをん",
-    }
-
-    def initial_group(reading: str) -> str:
-        if not isinstance(reading, str) or not reading:
-            return "その他"
-        ch = reading[0]
-        # ひらがな / カタカナ
-        if "\u3040" <= ch <= "\u309F" or "\u30A0" <= ch <= "\u30FF":
-            hira = _kata2hira_char(ch)  # カタカナ→ひらがな
-            for k, bag in GOJUON.items():
-                if hira in bag:
-                    return k
-            return "その他"
-        # 英字
-        if re.match(r"[A-Za-z]", ch):
-            return "A-Z"
-        return "その他"
-
-    # 読みCSV（author, reading）
+    # authors_readings.csv を読み込み（ひらがな検索＆表示は漢字）
     adf = load_authors_readings(AUTHORS_CSV_PATH)
-    if adf is not None and {"author", "reading"}.issubset(set(adf.columns)):
-        # 読み→著者
-        reading2author = dict(zip(adf["reading"], adf["author"]))
-        # まず全候補（読み）を作る
-        options_readings_all = list(reading2author.keys())
+    if adf is not None and not adf.empty:
+        # 英字判定：読みが A〜Z 始まり（ローマ字/英名を末尾に回す用）
+        def is_roman(hira: str) -> bool:
+            return bool(re.match(r"[A-Za-z]", str(hira or "")))
 
-        # ---------------- あかさたな（横ボタン・小型Pill） ----------------
-        st.markdown("##### 著者（行で絞り込み → 読みで検索可）")
-
-        # 小型PillボタンのCSS（横並びボタンを小さく）
-        st.markdown(
-            """
-            <style>
-            /* 直近の横並びボタンを小型Pill化（他ボタンへ影響しにくいように直近ブロックのみ） */
-            div[data-testid="stHorizontalBlock"] button {
-              padding: 2px 10px !important;
-              font-size: 0.75rem !important;
-              height: auto !important;
-              min-height: 0 !important;
-              line-height: 1.2 !important;
-              margin: 2px 4px !important;
-              border-radius: 999px !important;
-              background-color: #f0f0f0 !important;
-              border: 1px solid #aaa !important;
-              color: #000 !important;
-            }
-            div[data-testid="stHorizontalBlock"] button:hover {
-              background-color: #e0e0e0 !important;
-              border-color: #666 !important;
-            }
-            div[data-testid="stHorizontalBlock"] button:active {
-              background-color: #d0d0d0 !important;
-              border-color: #444 !important;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
-
-        # ボタン群
-        row_keys = ["すべて", "あ", "か", "さ", "た", "な", "は", "ま", "や", "ら", "わ", "A-Z"]
-        if "aka_selected_row" not in st.session_state:
-            st.session_state.aka_selected_row = "すべて"
-
-        cols_btn = st.columns(len(row_keys))
-        for i, lab in enumerate(row_keys):
-            if cols_btn[i].button(lab, key=f"aka_btn_{lab}"):
-                st.session_state.aka_selected_row = lab
-
-        selected_row = st.session_state.aka_selected_row
-
-        # ボタンに応じて読み候補を絞る
-        if selected_row == "すべて":
-            options_readings = options_readings_all
+        # イニシャルで候補を絞る
+        ini = st.session_state.author_initial
+        if ini == "英字":
+            cand = adf[adf["reading"].str.match(r"[A-Za-z]", na=False)].copy()
         else:
-            options_readings = [
-                r for r in options_readings_all
-                if initial_group(r) == selected_row
-            ]
+            # ひらがな先頭が該当行
+            cand = adf[adf["reading"].str.startswith(ini, na=False)].copy()
 
-        # 読みで検索（表示は「漢字｜読み」）
+        # 表示順：ひらがな→カタカナ→英字（英字は最後）
+        def sort_key(row):
+            r = str(row["reading"])
+            # 英字は末尾へ
+            if is_roman(r):
+                return (2, r.lower())
+            # カタカナ先頭は中間
+            if re.match(r"[\u30A0-\u30FF]", r):
+                return (1, jaconv.kata2hira(r))
+            # ひらがなは先頭
+            return (0, r)
+
+        cand = cand.sort_values(key=lambda s: s.index.map(lambda i: sort_key(cand.loc[i])))
+
+        # multiselect の options は reading、表示は「漢字｜読み」
+        reading2author = dict(zip(cand["reading"], cand["author"]))
+        options_readings = list(reading2author.keys())
         authors_sel_readings = st.multiselect(
-            "著者（読みで入力→候補から選択／表示は漢字＋読み）",
-            options=sorted(options_readings, key=lambda r: (initial_group(r) == "A-Z", r)),
+            "著者（読みで検索可 / 表示は漢字＋読み）",
+            options=options_readings,
             format_func=lambda r: f"{reading2author.get(r, r)}｜{r}",
-            placeholder="例：やまだ / さとう / たかはし ...",
+            placeholder="例：やまだ / さとう / たかはし ..."
         )
-        # 後段フィルタ用（『著者』列に対して従来どおり一致判定するため漢字に変換）
+        # 後段のフィルタは従来通り「著者（漢字）」へ変換
         authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
     else:
-        # フォールバック：従来の著者 multiselect
-        st.markdown("##### 著者")
+        # フォールバック：従来の著者リスト
         authors_all = build_author_candidates(df)
         authors_sel = st.multiselect("著者", authors_all, default=[])
+
+# --- 未定義ガード（apply_filters 実行前の保険）---
+if 'authors_sel' not in locals(): authors_sel = []
+if 'targets_sel' not in locals(): targets_sel = []
+if 'types_sel'   not in locals(): types_sel   = []
 
 # --- 著者・対象物・研究タイプフィルタ UI の直後あたりに追加 ---
 if 'authors_sel' not in locals():
