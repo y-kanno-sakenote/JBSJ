@@ -382,65 +382,70 @@ with c_tp:
     types_all = order_by_template(list(raw_types), TYPE_ORDER)
     types_sel = st.multiselect("研究タイプ（複数選択／部分一致）", types_all, default=[])
 
-# --- 著者 ---
+# --- 著者（あかさたなラジオ → オートコンプリート）---
 with c_a:
     st.caption("著者の読み頭文字でサジェストを絞り込み")
     initials = ["すべて","あ","か","さ","た","な","は","ま","や","ら","わ","英字"]
 
-    # ラジオボタン
-    author_initial = st.radio(
-        "頭文字を選択",
+    if "author_initial" not in st.session_state:
+        st.session_state.author_initial = "すべて"
+
+    st.session_state.author_initial = st.radio(
+        "著者イニシャル選択",
         initials,
-        index=0,  # デフォルトは「すべて」
         horizontal=True,
+        index=0,
         key="author_initial_radio"
     )
 
+    # authors_readings.csv を読み込み
     adf = load_authors_readings(AUTHORS_CSV_PATH)
     if adf is not None and not adf.empty:
-        if author_initial == "すべて":
-            cand = adf.loc[:, ["reading","author"]].dropna().copy()
-        elif author_initial == "英字":
-            mask = adf["reading"].str.match(r"[A-Za-z]", na=False)
-            cand = adf.loc[mask, ["reading","author"]].dropna().copy()
-        else:
-            # 各行ごとの先頭文字セット
-            groups = {
-                "あ": "あいうえお",
-                "か": "かきくけこ",
-                "さ": "さしすせそ",
-                "た": "たちつてと",
-                "な": "なにぬねの",
-                "は": "はひふへほ",
-                "ま": "まみむめも",
-                "や": "やゆよ",
-                "ら": "らりるれろ",
-                "わ": "わをん",
-            }
-            group = groups.get(author_initial, author_initial)
-            mask = adf["reading"].astype(str).str[0].isin(list(group))
-            cand = adf.loc[mask, ["reading","author"]].dropna().copy()
+        cand = adf.copy()
 
-        # 並び順調整（ひらがな→カタカナ→英字）
-        def is_roman(s): return bool(re.match(r"[A-Za-z]", str(s or "")))
-        def is_katakana(s): return bool(re.match(r"[\u30A0-\u30FF]", str(s or "")))
-        def sort_tuple(r):
-            rr = str(r["reading"])
-            if is_roman(rr): return (2, rr.lower())
-            if is_katakana(rr): return (1, rr)
-            return (0, rr)
+        # 選択されたラジオボタンに応じてフィルタリング
+        ini = st.session_state.author_initial
+        if ini != "すべて":
+            if ini == "英字":
+                cand = cand[cand["reading"].str.match(r"[A-Za-z]")]
+            else:
+                cand = cand[cand["reading"].str.startswith(ini)]
 
-        _tmp = cand.apply(lambda r: pd.Series(sort_tuple(r), index=["_grp","_key"]), axis=1)
+        # 並び順制御: あかさたな順 → カタカナ → 英字
+        AIUEO_ORDER = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん"
+
+        def sort_tuple(row):
+            r = str(row["reading"])
+            if not r:
+                return (3, 999, r)  # 空は最後
+            first = r[0]
+            # 英字
+            if re.match(r"[A-Za-z]", first):
+                return (2, 999, first.lower())
+            # カタカナ
+            if re.match(r"[\u30A0-\u30FF]", first):
+                return (1, 999, first)
+            # ひらがな → あかさたな順
+            idx = AIUEO_ORDER.find(first)
+            if idx == -1:
+                idx = 998  # 未対応文字は最後
+            return (0, idx, r)
+
+        _tmp = cand.apply(
+            lambda r: pd.Series(sort_tuple(r), index=["_grp", "_key", "_sub"]),
+            axis=1
+        )
         cand = pd.concat([cand.reset_index(drop=True), _tmp], axis=1) \
-                 .sort_values(by=["_grp","_key"], kind="mergesort") \
-                 .drop(columns=["_grp","_key"]).reset_index(drop=True)
+                 .sort_values(by=["_grp", "_key", "_sub"], kind="mergesort") \
+                 .drop(columns=["_grp", "_key", "_sub"]).reset_index(drop=True)
 
+        # multiselect の options は reading、表示は「漢字｜読み」
         reading2author = dict(zip(cand["reading"], cand["author"]))
         options_readings = list(reading2author.keys())
         authors_sel_readings = st.multiselect(
             "著者（読みで検索可 / 表示は漢字＋読み）",
             options=options_readings,
-            format_func=lambda r: f"{reading2author.get(r,r)}｜{r}",
+            format_func=lambda r: f"{reading2author.get(r, r)}｜{r}",
             placeholder="例：やまだ / さとう / たかはし ..."
         )
         authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
