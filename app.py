@@ -453,26 +453,41 @@ with c_a:
             cand = cand[cand["reading"].apply(in_row)]
 
         # 並び順: ひらがな行順 → カタカナ → 英字
-        AIUEO_ORDER = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん"
+        AIUEO_ORDER = "あいうえおかきくけこさしすせそたちつてとなにぬねの" \
+                      "はひふへほまみむめもやゆよらりるれろわをん"
 
         def sort_tuple(row):
             r = str(row["reading"])
             if not r:
                 return (3, 999, r)
-            ch = r[0]
-            if re.match(r"[A-Za-z]", ch):
-                return (2, 999, ch.lower())            # 英字は最後
-            if re.match(r"[\u30A0-\u30FF]", ch):
-                return (1, 999, r)                      # カタカナは中間
-            idx = AIUEO_ORDER.find(ch)                  # ひらがな → 行順
-            if idx == -1:
-                idx = 998
-            return (0, idx, r)
 
-        _tmp = cand.apply(lambda r: pd.Series(sort_tuple(r), index=["_grp","_key","_sub"]), axis=1)
+            # カタカナをひらがなに変換して判定
+            hira = kata_to_hira(r)
+            ch = hira[0]
+
+            # 英字
+            if re.match(r"[A-Za-z]", r[0]):
+                return (2, 999, r.lower())
+
+            # ひらがな → 五十音順
+            idx = AIUEO_ORDER.find(ch)
+            if idx != -1:
+                return (0, idx, r)
+
+            # カタカナ（ひらがな変換できなかった場合）
+            if re.match(r"[\u30A0-\u30FF]", r[0]):
+                return (1, 999, r)
+
+            return (3, 998, r)  # その他
+
+        _tmp = cand.apply(
+            lambda row: pd.Series(sort_tuple(row), index=["_grp", "_key", "_sub"]),
+            axis=1
+        )
         cand = pd.concat([cand.reset_index(drop=True), _tmp], axis=1) \
-                 .sort_values(by=["_grp","_key","_sub"], kind="mergesort") \
-                 .drop(columns=["_grp","_key","_sub"]).reset_index(drop=True)
+                 .sort_values(by=["_grp", "_key", "_sub"], kind="mergesort") \
+                 .drop(columns=["_grp", "_key", "_sub"]) \
+                 .reset_index(drop=True)
 
         # multiselect の options は reading、表示は「漢字｜読み」
         reading2author = dict(zip(cand["reading"], cand["author"]))
