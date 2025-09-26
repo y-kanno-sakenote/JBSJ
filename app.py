@@ -16,7 +16,41 @@ import pandas as pd
 import requests
 import streamlit as st
 from pathlib import Path
+# === 入力欄のコントラスト調整 CSS ===
+st.markdown(
+    """
+    <style>
+    /* 共通：入力欄の背景を白、文字を黒、枠線を濃いグレーに */
+    input, textarea, select {
+        background-color: #ffffff !important;
+        color: #000000 !important;
+        border: 2px solid #444 !important;
+        border-radius: 6px !important;
+        padding: 4px 8px !important;
+    }
 
+    /* フォーカス時（入力中）は青の枠線にハイライト */
+    input:focus, textarea:focus, select:focus {
+        border: 2px solid #1a73e8 !important;
+        box-shadow: 0 0 4px #1a73e8 !important;
+        outline: none !important;
+    }
+
+    /* Streamlit 特有のコンポーネント（multiselect など）の背景 */
+    .stMultiSelect div[data-baseweb="select"] {
+        background-color: #ffffff !important;
+        color: #000000 !important;
+        border: 2px solid #444 !important;
+        border-radius: 6px !important;
+    }
+    .stMultiSelect div[data-baseweb="select"]:focus-within {
+        border: 2px solid #1a73e8 !important;
+        box-shadow: 0 0 4px #1a73e8 !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 # -------------------- ページ設定 --------------------
 st.set_page_config(page_title="論文検索（統一UI版）", layout="wide")
 
