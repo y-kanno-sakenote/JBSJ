@@ -353,7 +353,12 @@ with c_a:
     adf = load_authors_readings(AUTHORS_CSV_PATH)
     if adf is not None:
         reading2author = dict(zip(adf["reading"], adf["author"]))
-        options_readings = sorted(reading2author.keys())
+
+        # --- 並び替え: 日本語 -> 英語 ---
+        jp_readings = [r for r, a in reading2author.items() if not re.match(r"^[A-Za-z]", a)]
+        en_readings = [r for r, a in reading2author.items() if re.match(r"^[A-Za-z]", a)]
+        options_readings = sorted(jp_readings) + sorted(en_readings)
+
         authors_sel_readings = st.multiselect(
             "著者（読みで検索可 / 表示は漢字＋読み）",
             options=options_readings,
@@ -370,11 +375,11 @@ with c_tg:
     raw_targets = {t for v in df.get("対象物_top3", pd.Series(dtype=str)).fillna("") for t in split_multi(v)}
     targets_all = order_by_template(list(raw_targets), TARGET_ORDER)
     targets_sel = st.multiselect("対象物（複数選択／部分一致）", targets_all, default=[])
+
 with c_tp:
     raw_types = {t for v in df.get("研究タイプ_top3", pd.Series(dtype=str)).fillna("") for t in split_multi(v)}
     types_all = order_by_template(list(raw_types), TYPE_ORDER)
     types_sel = st.multiselect("研究タイプ（複数選択／部分一致）", types_all, default=[])
-
 # -------------------- キーワード検索 --------------------
 c_kw1, c_kw2 = st.columns([3, 1])
 with c_kw1:
