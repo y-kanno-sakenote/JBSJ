@@ -9,7 +9,7 @@
 - お気に入り一覧（常設・★で解除/追加）
 - お気に入りタグ付け：お気に入り表の「tags」列を直接編集（カンマ/空白区切り）
 - 「❌ 全て外す」ボタンでお気に入り一括解除
-- ★新機能：検索結果の著者名をクリックすると、その著者でフィルターがかかる
+- ★新機能：検索結果の論文の著者名をクリックすると、その著者でフィルターがかかる
 """
 
 import io, re, time
@@ -111,41 +111,19 @@ st.markdown(
     ul[role="listbox"]::-webkit-scrollbar-thumb:hover {
       background: #333;
     }
-    
-    /* 著者の絞り込みボタン */
-    .filter-author-btn {
-        background: transparent !important;
-        border: none !important;
-        color: #1a73e8 !important;
-        font-size: 0.9em !important;
-        padding: 0 !important;
-        margin-left: 5px !important;
-        cursor: pointer;
-    }
-    .filter-author-btn:hover {
-        text-decoration: underline;
-    }
-    
-    /* カスタムテーブルのヘッダー */
-    .custom-table-header {
-        display: flex;
-        font-weight: bold;
-        padding: 10px 0;
-        border-bottom: 2px solid #e0e0e0;
-        margin-bottom: 5px;
-        color: #444;
-    }
-    .custom-table-row {
-        display: flex;
-        align-items: center;
-        padding: 5px 0;
-        border-bottom: 1px solid #f0f0f0;
-    }
-    .custom-table-col {
-        padding: 0 5px;
-        word-break: break-word;
-    }
 
+    /* 著者の絞り込みボタン */
+    .stButton > button {
+        background-color: #d5d5d5;
+        color: #000;
+        border-radius: 12px;
+        padding: 4px 12px;
+        font-size: 0.9rem;
+        border: none;
+    }
+    .stButton > button:hover {
+        background-color: #b0b0b0;
+    }
     </style>
     """,
     unsafe_allow_html=True
@@ -540,91 +518,65 @@ def apply_filters(_df: pd.DataFrame) -> pd.DataFrame:
 
 filtered = apply_filters(df)
 
-# -------------------- 検索結果テーブル（カスタム） --------------------
+# -------------------- 検索結果テーブル --------------------
 st.markdown("### 検索結果")
 st.caption(f"{len(filtered)} / {len(df)} 件")
 
-# --- カスタムテーブルのヘッダー ---
-header_cols = st.columns([0.5, 1, 1, 3, 2, 1, 1])
-with header_cols[0]: st.markdown("★")
-with header_cols[1]: st.markdown("発行年")
-with header_cols[2]: st.markdown("巻数/号数")
-with header_cols[3]: st.markdown("論文タイトル")
-with header_cols[4]: st.markdown("著者")
-with header_cols[5]: st.markdown("HP")
-with header_cols[6]: st.markdown("PDF")
-
-st.markdown("---")
-
-# --- カスタムテーブルの行 ---
-# 表示する列をフィルタリング
 visible_cols = make_visible_cols(filtered)
 if "著者" in visible_cols and "summary" in filtered.columns:
     idx = visible_cols.index("著者")
     if "summary" not in visible_cols:
         visible_cols.insert(idx + 1, "summary")
-        
-disp_cols_map = {
-    "発行年": 1, "巻数": 2, "号数": 2, "論文タイトル": 3, "著者": 4, 
-    "HPリンク先": 5, "PDFリンク先": 6, "対象物_top3": 7, "研究タイプ_top3": 8
+
+disp = filtered.loc[:, visible_cols].copy()
+disp["_row_id"] = disp.apply(make_row_id, axis=1)
+
+if "favs" not in st.session_state:
+    st.session_state.favs = set()
+if "fav_tags" not in st.session_state:
+    st.session_state.fav_tags = {}
+
+# --- 著者フィルターのクリアボタン ---
+if st.session_state.authors_sel:
+    st.info(f"現在選択中の著者: {', '.join(st.session_state.authors_sel)}")
+    if st.button("❌ 著者フィルターをクリア", key="clear_author_filter"):
+        st.session_state.authors_sel = []
+        st.rerun()
+
+# 論文リストをst.data_editorで表示し、行選択で著者フィルターをかける
+st.info("💡 論文の行をクリックすると、その論文の著者でフィルターがかかります。")
+
+disp["★"] = disp["_row_id"].apply(lambda rid: "★" if rid in st.session_state.favs else "")
+disp = disp.drop(columns=["_row_id"], errors="ignore")
+
+column_config = {
+    "HPリンク先": st.column_config.LinkColumn("HP", help="外部サイトへ移動", display_text="HP"),
+    "PDFリンク先": st.column_config.LinkColumn("PDF", help="PDFを開く", display_text="PDF"),
+    "論文タイトル": st.column_config.Column("論文タイトル", help="タイトル"),
+    "著者": st.column_config.Column("著者", help="著者"),
+    "発行年": st.column_config.Column("発行年", help="発行年"),
+    "巻数": st.column_config.Column("巻数", help="巻"),
+    "号数": st.column_config.Column("号数", help="号"),
+    "対象物_top3": st.column_config.Column("対象物", help="研究対象物"),
+    "研究タイプ_top3": st.column_config.Column("研究タイプ", help="研究タイプ"),
+    "summary": st.column_config.Column("要約", help="論文の要約"),
+    "★": st.column_config.Column("★"),
 }
-col_widths = [0.5, 1, 1, 3, 2, 1, 1]
 
-for idx, row in filtered.iterrows():
-    row_id = make_row_id(row)
-    fav_state = row_id in st.session_state.favs
-    
-    row_cols = st.columns(col_widths)
-    
-    # ★ チェックボックス
-    with row_cols[0]:
-        new_fav_state = st.checkbox("", value=fav_state, key=f"fav_{row_id}", label_visibility="collapsed")
-        if new_fav_state != fav_state:
-            if new_fav_state:
-                st.session_state.favs.add(row_id)
-            else:
-                st.session_state.favs.discard(row_id)
-            st.rerun()
+with st.form("main_table_form", clear_on_submit=False):
+    edited_main = st.data_editor(
+        disp,
+        key="main_editor",
+        use_container_width=True,
+        hide_index=True,
+        column_config=column_config,
+        disabled=disp.columns
+    )
+    apply_main = st.form_submit_button("チェックした論文をお気に入りリストに追加", use_container_width=True)
 
-    # 発行年
-    with row_cols[1]:
-        st.write(str(row.get("発行年", "")))
-    
-    # 巻数/号数
-    with row_cols[2]:
-        vol = row.get("巻数", "")
-        issue = row.get("号数", "")
-        st.write(f"{vol}巻{issue}号")
+if apply_main:
+    st.toast("お気に入りリストへの追加は、お気に入りリストから直接行ってください。")
 
-    # 論文タイトル
-    with row_cols[3]:
-        st.write(row.get("論文タイトル", ""))
-
-    # 著者 + 検索ボタン
-    with row_cols[4]:
-        authors = split_authors(row.get("著者", ""))
-        for i, author in enumerate(authors):
-            st.button(
-                f"{author} 🔎", 
-                key=f"filter_btn_{row_id}_{i}", 
-                on_click=filter_by_author, 
-                args=(author,),
-                use_container_width=True
-            )
-            
-    # HPリンク
-    with row_cols[5]:
-        hp_link = row.get("HPリンク先", "")
-        if hp_link:
-            st.markdown(f"[HP]({hp_link})")
-
-    # PDFリンク
-    with row_cols[6]:
-        pdf_link = row.get("PDFリンク先", "")
-        if pdf_link:
-            st.markdown(f"[PDF]({pdf_link})")
-
-st.markdown("---")
 
 # --- お気に入り一覧ヘッダー＋全外しボタン（横並び） ---
 c1, c2 = st.columns([6, 1])
@@ -730,8 +682,7 @@ st.caption(
     f"タグ数：{len({t for s in st.session_state.fav_tags.values() for t in s})} 種"
 )
 
-# `filtered` DataFrameにはまだ★や_row_idが含まれている可能性があるので、dropする
-filtered_export_df = filtered.drop(columns=["★", "_row_id"], errors="ignore")
+filtered_export_df = disp.drop(columns=["★"], errors="ignore")
 
 fav_export = fav_disp_full[fav_disp_full["_row_id"].isin(st.session_state.favs)].copy()
 
