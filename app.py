@@ -549,12 +549,21 @@ display_order = ["★"] + [c for c in disp.columns if c not in ["★", "_row_id"
 
 # --- メイン表（フォームで一括反映） ---
 st.subheader("論文リスト")
-if st.button("❌ このリストのチェックを全て外す", key="clear_main_list", use_container_width=True):
-    # 表示中の論文の DOI / 識別子を取得して、session_state.favs から削除
+# --- 検索結果リストの★を全て外す ---
+if st.button("❌ このリストの★を全て外す", key="clear_main_list", use_container_width=True):
     if "favs" in st.session_state and not disp.empty:
-        ids_in_view = set(disp["DOI"].dropna().unique()) if "DOI" in disp.columns else set()
+        # 論文ごとのユニークID（DOI優先、なければタイトル）
+        if "DOI" in disp.columns:
+            ids_in_view = set(disp["DOI"].dropna().unique())
+        else:
+            ids_in_view = set(disp["論文タイトル"].dropna().unique())
+
+        # 表示中のIDを除外して favs を更新
         st.session_state.favs = {f for f in st.session_state.favs if f not in ids_in_view}
+
+        # UIを更新
         st.rerun()
+
 with st.form("main_table_form", clear_on_submit=False):
     edited_main = st.data_editor(
         disp[display_order],
