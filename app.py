@@ -244,7 +244,7 @@ def make_row_id(row):
     return f"T:{ttl}|Y:{yr}"
 
 # -------------------- データ読み込み --------------------
-st.title("醸造協会誌　論文検索")
+st.title("醸造協会誌　論文検索 β_2.0")
 
 DEMO_CSV_PATH = Path("data/keywords_summary5.csv")   # メインCSV
 SUMMARY_CSV_PATH = Path("data/summaries.csv")         # ← 追加: summary
