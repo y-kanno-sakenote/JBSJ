@@ -457,30 +457,23 @@ with row2_author:
 
         reading2author = dict(zip(cand["reading"], cand["author"]))
         options_readings = list(reading2author.keys())
-        
-        selected_readings = []
-        if 'authors_sel' in st.session_state:
-            selected_author_names = set(st.session_state.authors_sel)
-            for r, a in reading2author.items():
-                if a in selected_author_names:
-                    selected_readings.append(r)
 
         authors_sel_readings = st.multiselect(
             "著者（読みで検索可 / 表示は漢字＋読み）",
             options=options_readings,
-            default=selected_readings,
             format_func=lambda r: f"{reading2author.get(r, r)}｜{r}",
             placeholder="例：やまだ / さとう / たかはし ..."
         )
-        st.session_state.authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
+        authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
     else:
         authors_all = build_author_candidates(df)
-        st.session_state.authors_sel = st.multiselect("著者", authors_all, default=st.session_state.authors_sel)
+        authors_sel = st.multiselect("著者", authors_all, default=[])
 
 # 念のため未定義ガード
-if 'authors_sel' not in st.session_state: st.session_state.authors_sel = []
+if 'authors_sel' not in locals(): authors_sel = []
 if 'targets_sel' not in locals(): targets_sel = []
 if 'types_sel'   not in locals(): types_sel   = []
+
 # -------------------- 検索フィルタ（3段目：キーワード） --------------------
 kw_row1, kw_row2 = st.columns([3, 1])
 with kw_row1:
@@ -499,8 +492,8 @@ def apply_filters(_df: pd.DataFrame) -> pd.DataFrame:
         df2 = df2[df2["巻数"].map(to_int_or_none).isin(set(vols_sel))]
     if issues_sel and "号数" in df2.columns:
         df2 = df2[df2["号数"].map(to_int_or_none).isin(set(issues_sel))]
-    if st.session_state.authors_sel and "著者" in df2.columns:
-        sel = {norm_key(a) for a in st.session_state.authors_sel}
+    if authors_sel and "著者" in df2.columns:
+        sel = {norm_key(a) for a in authors_sel}
         def hit_author(v): return any(norm_key(x) in sel for x in split_authors(v))
         df2 = df2[df2["著者"].apply(hit_author)]
     if targets_sel and "対象物_top3" in df2.columns:
@@ -573,7 +566,6 @@ if apply_main:
     subset_ids_main = set(disp["_row_id"].tolist())
     checked_subset_main = set(edited_main.loc[edited_main["★"] == True, "_row_id"].tolist())
     st.session_state.favs = (st.session_state.favs - subset_ids_main) | checked_subset_main
-    st.rerun() # ここで再実行
 
 # --- お気に入り一覧ヘッダー＋全外しボタン（横並び） ---
 c1, c2 = st.columns([6, 1])
@@ -593,6 +585,7 @@ if "著者" in visible_cols_full and "summary" in df.columns:
     if "summary" not in visible_cols_full:
         visible_cols_full.insert(idx + 1, "summary")
 
+fav_disp_full = df.loc[:, visible_cols_full].copy()
 fav_disp_full = df.loc[:, visible_cols_full].copy()
 fav_disp_full["_row_id"] = fav_disp_full.apply(make_row_id, axis=1)
 fav_disp = fav_disp_full[fav_disp_full["_row_id"].isin(st.session_state.favs)].copy()
@@ -692,7 +685,7 @@ filtered_export_df = disp.drop(columns=["★", "_row_id"], errors="ignore")
 fav_export = fav_disp_full[fav_disp_full["_row_id"].isin(st.session_state.favs)].copy()
 
 def _tags_join(rid: str) -> str:
-    s = st.session_state.favs.get(rid, set())
+    s = st.session_state.fav_tags.get(rid, set())
     return ", ".join(sorted(s)) if s else ""
 
 fav_export["tags"] = fav_export["_row_id"].map(_tags_join)
