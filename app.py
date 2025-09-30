@@ -547,16 +547,14 @@ if "PDFリンク先" in disp.columns:
 
 display_order = ["★"] + [c for c in disp.columns if c not in ["★", "_row_id"]] + ["_row_id"]
 
-# --- メイン表（全解除ボタン + フォームで一括反映） ---
-cml1, cml2 = st.columns([6, 1])
-with cml1:
-    st.subheader("論文リスト")
-with cml2:
-    if st.button("❌ 全て外す（お気に入り解除）", key="clear_favs_main", use_container_width=True):
-        # グローバルにお気に入りを全解除（お気に入り一覧のボタンと同じ動き）
-        st.session_state.favs = set()
+# --- メイン表（フォームで一括反映） ---
+st.subheader("論文リスト")
+if st.button("❌ このリストのチェックを全て外す", key="clear_main_list", use_container_width=True):
+    # 表示中の論文の DOI / 識別子を取得して、session_state.favs から削除
+    if "favs" in st.session_state and not disp.empty:
+        ids_in_view = set(disp["DOI"].dropna().unique()) if "DOI" in disp.columns else set()
+        st.session_state.favs = {f for f in st.session_state.favs if f not in ids_in_view}
         st.rerun()
-
 with st.form("main_table_form", clear_on_submit=False):
     edited_main = st.data_editor(
         disp[display_order],
