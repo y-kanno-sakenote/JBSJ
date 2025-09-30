@@ -388,10 +388,14 @@ def filter_by_author(author_name):
     st.rerun()
 
 def handle_author_multiselect_change():
-    reading2author = dict(zip(st.session_state.author_candidates["reading"], st.session_state.author_candidates["author"]))
+    # on_changeコールバックでは、`st.session_state`のキーを直接参照
     selected_readings = st.session_state.authors_multiselect_key
+    
+    reading2author = dict(zip(st.session_state.author_candidates["reading"], st.session_state.author_candidates["author"]))
     st.session_state.authors_sel = sorted({reading2author[r] for r in selected_readings}) if selected_readings else []
-    # on_changeで直接stateを変更しているのでrerunは不要
+    
+    # 著者フィルターの変更は rerunn が必要
+    st.rerun()
 
 row2_author, row2_radio = st.columns([1.0, 2.0])   # ← 著者欄を短めにしてラジオに幅を多めに
 
@@ -495,6 +499,7 @@ with row2_author:
         authors_all = build_author_candidates(df)
         st.session_state.authors_sel = st.multiselect("著者", authors_all, default=st.session_state.authors_sel)
 
+
 # -------------------- 検索フィルタ（3段目：キーワード） --------------------
 kw_row1, kw_row2 = st.columns([3, 1])
 with kw_row1:
@@ -559,23 +564,20 @@ disp["★"] = disp["_row_id"].apply(lambda rid: rid in st.session_state.favs)
 
 
 def handle_main_editor_change():
-    # on_changeコールバックでは、edited_rowsから変更を検知
-    edited_rows = st.session_state.main_editor.get('edited_rows', {})
-    for row_index, changes in edited_rows.items():
-        row_id = disp.iloc[int(row_index)]['_row_id']
+    edited_rows_dict = st.session_state.main_editor['edited_rows']
+    for row_index_str, changes in edited_rows_dict.items():
+        row_index = int(row_index_str)
+        row_id = disp.iloc[row_index]['_row_id']
         if '★' in changes:
             if changes['★']:
                 st.session_state.favs.add(row_id)
             else:
                 st.session_state.favs.discard(row_id)
-    # ここでrerunを呼ぶとスクロールがリセットされる
-    # お気に入りリストの更新にはrerunが必要なので、やむを得ない
-    # ただし、メインリストの編集だけならrerunは不要
+    # on_changeで直接stateを変更すればrerunは不要
+    # ただし、他のウィジェットの変更を即座に反映させる場合はrerunが必要
 
 def update_fav_and_tags_from_favs():
     edited_favs = st.session_state.fav_editor['edited_rows']
-    
-    # fav_dispの_row_idリストを取得
     fav_ids_in_view = fav_disp['_row_id'].tolist()
     
     for row_index_str, changes in edited_favs.items():
@@ -596,7 +598,7 @@ def update_fav_and_tags_from_favs():
                 st.session_state.fav_tags[row_id] = tag_set
             elif row_id in st.session_state.fav_tags:
                 del st.session_state.fav_tags[row_id]
-
+                
     st.rerun()
 
 
