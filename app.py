@@ -383,11 +383,16 @@ with row1_tp:
 if "authors_sel" not in st.session_state:
     st.session_state.authors_sel = []
 
+def filter_by_author(author_name):
+    st.session_state.authors_sel = [author_name]
+    st.rerun()
+
 def handle_author_multiselect(selected_readings):
     reading2author = dict(zip(st.session_state.author_candidates["reading"], st.session_state.author_candidates["author"]))
     st.session_state.authors_sel = sorted({reading2author[r] for r in selected_readings}) if selected_readings else []
+    # st.rerun() # ← この再実行がスクロールリセットの原因。最終版では不要
 
-row2_author, row2_radio = st.columns([1.0, 2.0])
+row2_author, row2_radio = st.columns([1.0, 2.0])   # ← 著者欄を短めにしてラジオに幅を多めに
 
 with row2_radio:
     initials = ["すべて","あ","か","さ","た","な","は","ま","や","ら","わ","英字"]
@@ -397,33 +402,47 @@ with row2_radio:
     "著者イニシャル選択",
     options=initials,
     horizontal=True,
-    key="author_initial",
+    key="author_initial",   # ← これが唯一のソースオブトゥルース
 )
 
+# 以降は session_state から読むだけ（代入しない）
 ini = st.session_state["author_initial"]
+# authors_readings.csv を読み込み
 if "author_candidates" not in st.session_state:
     st.session_state.author_candidates = load_authors_readings(AUTHORS_CSV_PATH)
-
 with row2_author:
     adf = st.session_state.author_candidates
     if adf is not None and not adf.empty:
         cand = adf.copy()
 
+        # --- （以下は従来と同じフィルタ＆並び替え処理）---
         GOJUON = {
-            "あ": "あいうえお", "か": "かきくけこがぎぐげご", "さ": "さしすせそざじずぜぞ",
-            "た": "たちつてとだぢづでど", "な": "なにぬねの", "は": "はひふへほばびぶべぼぱぴぷぺぽ",
-            "ま": "まみむめも", "や": "やゆよ", "ら": "らりるれろ", "わ": "わをん",
+            "あ": "あいうえお",
+            "か": "かきくけこがぎぐげご",
+            "さ": "さしすせそざじずぜぞ",
+            "た": "たちつてとだぢづでど",
+            "な": "なにぬねの",
+            "は": "はひふへほばびぶべぼぱぴぷぺぽ",
+            "ま": "まみむめも",
+            "や": "やゆよ",
+            "ら": "らりるれろ",
+            "わ": "わをん",
         }
+
         def kata_to_hira(s: str) -> str:
             out = []
             for ch in str(s or ""):
                 o = ord(ch)
-                if 0x30A1 <= o <= 0x30F6: out.append(chr(o - 0x60))
-                else: out.append(ch)
+                if 0x30A1 <= o <= 0x30F6:
+                    out.append(chr(o - 0x60))
+                else:
+                    out.append(ch)
             return "".join(out)
+
         def hira_head(s: str) -> str | None:
             s = str(s or "")
             return kata_to_hira(s)[0] if s else None
+
         def is_roman_head(s: str) -> bool:
             return bool(re.match(r"[A-Za-z]", str(s or "")))
 
@@ -435,6 +454,8 @@ with row2_author:
             cand = cand[cand["reading"].apply(
                 lambda s: (not is_roman_head(s)) and (hira_head(s) in allowed if hira_head(s) else False)
             )]
+
+        # 並び順
         AIUEO_ORDER = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん"
         def sort_tuple(reading: str):
             if not reading: return (3, 999, "")
@@ -467,13 +488,17 @@ with row2_author:
             format_func=lambda r: f"{reading2author.get(r, r)}｜{r}",
             placeholder="例：やまだ / さとう / たかはし ...",
             on_change=handle_author_multiselect,
-            args=(authors_sel_readings,) # ここはうまく動かない可能性が高い
+            args=(authors_sel_readings,) # これが問題の行
         )
-        st.session_state.authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
+        # st.session_state.authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
     else:
         authors_all = build_author_candidates(df)
         st.session_state.authors_sel = st.multiselect("著者", authors_all, default=st.session_state.authors_sel)
 
+# 念のため未定義ガード
+if 'authors_sel' not in st.session_state: st.session_state.authors_sel = []
+if 'targets_sel' not in locals(): targets_sel = []
+if 'types_sel'   not in locals(): types_sel   = []
 
 # -------------------- 検索フィルタ（3段目：キーワード） --------------------
 kw_row1, kw_row2 = st.columns([3, 1])
@@ -537,44 +562,37 @@ if "fav_tags" not in st.session_state:
 # メイン表：お気に入りチェック列
 disp["★"] = disp["_row_id"].apply(lambda rid: rid in st.session_state.favs)
 
-# LinkColumn 設定
-column_config = {
-    "★": st.column_config.CheckboxColumn("★", help="気になる論文にチェック/解除", default=False, width="small"),
-}
-if "HPリンク先" in disp.columns:
-    column_config["HPリンク先"] = st.column_config.LinkColumn("HPリンク先", help="外部サイトへ移動", display_text="HP")
-if "PDFリンク先" in disp.columns:
-    column_config["PDFリンク先"] = st.column_config.LinkColumn("PDFリンク先", help="PDFを開く", display_text="PDF")
-
-display_order = ["★"] + [c for c in disp.columns if c not in ["★", "_row_id"]] + ["_row_id"]
-
 def handle_main_editor_change():
-    edited_df = pd.DataFrame(st.session_state.main_editor['edited_rows']).T
-    if not edited_df.empty:
-        # Check for changes in '★'
-        for row_index, row_changes in edited_df.iterrows():
-            row_id = disp.iloc[row_index]['_row_id']
-            if '★' in row_changes:
-                if row_changes['★']:
-                    st.session_state.favs.add(row_id)
-                else:
-                    st.session_state.favs.discard(row_id)
-    # Rerun to update favorites list, but this causes the scroll reset.
-    # We will need to remove st.rerun for the final solution.
-    # For now, it's needed to update the favorites list below.
-    # st.rerun()
+    edited_rows_dict = st.session_state.main_editor['edited_rows']
+    for row_index, row_changes in edited_rows_dict.items():
+        row_id = disp.iloc[int(row_index)]['_row_id']
+        if '★' in row_changes:
+            if row_changes['★']:
+                st.session_state.favs.add(row_id)
+            else:
+                st.session_state.favs.discard(row_id)
+    # on_changeで直接stateを変更すればrerunは不要
+    # ただし、他のウィジェットの変更を即座に反映させる場合はrerunが必要
 
 # --- メイン表（on_changeで一括反映） ---
 st.subheader("論文リスト")
 
-edited_main = st.data_editor(
+column_config = {
+    "★": st.column_config.CheckboxColumn("★", help="気になる論文にチェック/解除", default=False, width="small"),
+    "HPリンク先": st.column_config.LinkColumn("HPリンク先", help="外部サイトへ移動", display_text="HP"),
+    "PDFリンク先": st.column_config.LinkColumn("PDFリンク先", help="PDFを開く", display_text="PDF"),
+}
+
+display_order = ["★"] + [c for c in disp.columns if c not in ["★", "_row_id"]] + ["_row_id"]
+
+st.data_editor(
     disp[display_order],
     key="main_editor",
     on_change=handle_main_editor_change,
     use_container_width=True,
     hide_index=True,
     column_config=column_config,
-    disabled=[c for c in display_order if c != "★"],
+    disabled=[c for c in display_order if c != "★"],  # ★のみ編集可
     height=520,
     num_rows="fixed",
 )
@@ -607,24 +625,29 @@ def tags_str_for(rid: str) -> str:
     return ", ".join(sorted(s)) if s else ""
 
 def handle_fav_editor_change():
-    edited_favs = pd.DataFrame(st.session_state.fav_editor['edited_rows']).T
-    if not edited_favs.empty:
-        # Handle '★' changes
-        for row_index, row_changes in edited_favs.iterrows():
-            row_id = fav_disp.iloc[row_index]['_row_id']
-            if '★' in row_changes:
-                if row_changes['★']:
-                    st.session_state.favs.add(row_id)
-                else:
-                    st.session_state.favs.discard(row_id)
-            if 'tags' in row_changes:
-                tag_set = parse_tags(row_changes['tags'])
-                if tag_set:
-                    st.session_state.fav_tags[row_id] = tag_set
-                elif row_id in st.session_state.fav_tags:
-                    del st.session_state.fav_tags[row_id]
-
-    st.rerun() # タグの変更は再描画が必要
+    edited_favs = st.session_state.fav_editor['edited_rows']
+    fav_ids_in_view = fav_disp['_row_id'].tolist()
+    
+    for row_index_str, row_changes in edited_favs.items():
+        row_index = int(row_index_str)
+        row_id = fav_ids_in_view[row_index]
+        
+        # '★'の変更を処理
+        if '★' in row_changes:
+            if row_changes['★']:
+                st.session_state.favs.add(row_id)
+            else:
+                st.session_state.favs.discard(row_id)
+        
+        # 'tags'の変更を処理
+        if 'tags' in row_changes:
+            tag_set = parse_tags(row_changes['tags'])
+            if tag_set:
+                st.session_state.fav_tags[row_id] = tag_set
+            elif row_id in st.session_state.fav_tags:
+                del st.session_state.fav_tags[row_id]
+                
+    st.rerun()
 
 if not fav_disp.empty:
     fav_disp["★"] = fav_disp["_row_id"].apply(lambda rid: rid in st.session_state.favs)
@@ -641,20 +664,19 @@ if not fav_disp.empty:
     if "PDFリンク先" in fav_disp.columns:
         fav_column_config["PDFリンク先"] = st.column_config.LinkColumn("PDFリンク先", display_text="PDF")
 
-    fav_edited = st.data_editor(
+    st.data_editor(
         fav_disp[fav_display_order],
         key="fav_editor",
+        on_change=handle_fav_editor_change,
         use_container_width=True,
         hide_index=True,
         column_config=fav_column_config,
-        disabled=[c for c in fav_display_order if c not in ["★", "tags"]],  # ← tags を編集可に
+        disabled=[c for c in fav_display_order if c not in ["★", "tags"]],
         height=420,
-        num_rows="fixed",
-        on_change=handle_fav_editor_change
+        num_rows="fixed"
     )
 else:
     st.info("お気に入りは未選択です。上の表の『★』にチェックしてから反映してください。")
-    fav_edited = None
 
 # -------------------- タグでお気に入りを絞り込み（AND/OR） --------------------
 with st.expander("🔎 タグでお気に入りを絞り込み（AND/OR）", expanded=False):
