@@ -656,86 +656,106 @@ with tab_search:
 
 # ==================== 📊 分析タブ ====================
 with tab_analysis:
-    st.markdown("### 著者共起（中心性ランキング＋全体ネットワーク）")
+    st.subheader("著者共起ネットワーク（中心性ランキング付き）")
 
-    # 1) 依存ライブラリは“遅延インポート”＋フェイルソフト
-    try:
-        import networkx as nx
-    except Exception as e:
-        st.warning("⚠️ 分析機能を有効化するには `pip install networkx` が必要です。")
-        st.stop()
-    try:
-        from pyvis.network import Network
-        _has_pyvis = True
-    except Exception:
-        _has_pyvis = False  # 可視化はpyvisがあればHTML埋め込み、無ければテーブルだけ
-
-    # 2) 必須列の存在チェック（落ちずに案内表示）
-    required = {"論文タイトル", "著者"}
-    if not required.issubset(set(df.columns)):
-        st.info("分析には『論文タイトル』『著者』列が必要です。読み込みCSVをご確認ください。")
-        st.stop()
-
-    # 3) 共著エッジ生成（同一論文内の著者を完全結合）
-    def split_authors(cell):
-        if not cell: return []
-        return [w.strip() for w in re.split(r"[;；,、，/／|｜]+", str(cell)) if w.strip()]
-
-    edges = []
-    for _, r in df.iterrows():
-        names = split_authors(r.get("著者", ""))
-        names = [n for n in names if n]  # 空除外
-        for i in range(len(names)):
-            for j in range(i+1, len(names)):
-                a, b = sorted([names[i], names[j]])
-                edges.append((a, b))
-
-    if not edges:
-        st.info("共著関係が検出できませんでした（著者データ不足の可能性）。")
-        st.stop()
-
-    # 4) グラフ構築 & 中心性ランキング
-    G = nx.Graph()
-    G.add_edges_from(edges)
-
-    deg = nx.degree_centrality(G)
-    btw = nx.betweenness_centrality(G, normalized=True)
-    eig = {}
-    try:
-        eig = nx.eigenvector_centrality(G, max_iter=500)
-    except Exception:
-        pass  # 収束しない場合はスキップ
-
-    rank_df = pd.DataFrame({
-        "著者": list(G.nodes()),
-        "次数中心性": [deg.get(n, 0.0) for n in G.nodes()],
-        "媒介中心性": [btw.get(n, 0.0) for n in G.nodes()],
-        "固有ベクトル中心性": [eig.get(n, 0.0) for n in G.nodes()],
-        "共著数": [G.degree(n) for n in G.nodes()],
-    }).sort_values(["共著数","媒介中心性","次数中心性"], ascending=False)
-
-    st.subheader("中心性ランキング（上位50）")
-    st.dataframe(rank_df.head(50), use_container_width=True, hide_index=True)
-
-    # 5) ネットワーク可視化（pyvis があれば）
-    if _has_pyvis:
-        st.subheader("共著ネットワーク（対話型）")
-        net = Network(height="650px", width="100%", bgcolor="#ffffff", font_color="#000000", notebook=False, directed=False)
-        net.toggle_physics(True)
-
-        # ノードサイズ＝共著数、色は固定
-        for n in G.nodes():
-            size = 10 + 2*G.degree(n)
-            net.add_node(n, label=n, value=size)
-
-        for u, v in G.edges():
-            net.add_edge(u, v)
-
-        html_path = "/mnt/data/coauthor_network.html"
-        net.show(html_path)
-        # HTMLを埋め込み（pyvisはiframe出力）
-        with open(html_path, "r", encoding="utf-8") as f:
-            html = f.read()
-        st.components.v1.html(html, height=680, scrolling=True)
+    # 対象データ選択
+    scope = st.radio("対象データ", ["検索結果（現在の条件）", "全件"], horizontal=True)
+    if scope == "検索結果（現在の条件）":
+        df_scope = apply_filters_for_current_state(df)
     else:
-        st.info("対話型グラフを表示するには `pip install pyvis` を行ってください。")
+        df_scope = df
+
+    st.caption(f"対象レコード数：{len(df_scope)}")
+
+    # 著者リスト抽出
+    def authors_list_from_row(v):
+        return split_authors(v) if isinstance(v, str) else []
+
+    author_rows = df_scope.get("著者", pd.Series(dtype=str)).fillna("").apply(authors_list_from_row)
+    # ノード・エッジ
+    G = nx.Graph()
+    for authors in author_rows:
+        authors = [a for a in authors if a]
+        # 自己ループ回避、重複除去
+        uniq = list(dict.fromkeys(authors))
+        for a in uniq:
+            if not G.has_node(a):
+                G.add_node(a)
+        for u, v in itertools.combinations(uniq, 2):
+            if G.has_edge(u, v):
+                G[u][v]["weight"] += 1
+            else:
+                G.add_edge(u, v, weight=1)
+
+    if G.number_of_nodes() == 0:
+        st.info("著者データがありません。検索条件を広げるか、全件を選択してください。")
+    else:
+        # 中心性
+        deg_c = nx.degree_centrality(G)
+        try:
+            btw_c = nx.betweenness_centrality(G, weight="weight", normalized=True)
+        except Exception:
+            btw_c = nx.betweenness_centrality(G, normalized=True)
+        try:
+            eig_c = nx.eigenvector_centrality_numpy(G, weight="weight")
+        except Exception:
+            # fallback（収束しない場合など）
+            eig_c = {n: np.nan for n in G.nodes()}
+
+        rank_df = pd.DataFrame({
+            "著者": list(G.nodes()),
+            "Degree": [deg_c.get(n, 0.0) for n in G.nodes()],
+            "Betweenness": [btw_c.get(n, 0.0) for n in G.nodes()],
+            "Eigenvector": [eig_c.get(n, np.nan) for n in G.nodes()],
+            "共同数（総計）": [int(sum(d["weight"] for *_e, d in G.edges(n, data=True))) for n in G.nodes()]
+        })
+        # 並び替えキー（Degree→Betweenness→Eigenvector）
+        rank_df = rank_df.sort_values(
+            by=["Degree","Betweenness","Eigenvector","共同数（総計）"],
+            ascending=[False, False, False, False]
+        ).reset_index(drop=True)
+
+        topk = st.slider("ランキング表示件数", min_value=10, max_value=200, value=50, step=10)
+        st.dataframe(rank_df.head(topk), use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+        st.markdown("#### ネットワーク可視化")
+
+        # PyVis → フォールバックで matplotlib
+        if _HAS_PYVIS:
+            nt = Network(height="680px", width="100%", notebook=False, bgcolor="#FFFFFF", font_color="#000000")
+            # 物理演算
+            nt.barnes_hut(gravity=-2000, central_gravity=0.3, spring_length=150, spring_strength=0.05, damping=0.9)
+
+            # ノードサイズ（Degree）
+            max_deg = max(deg_c.values()) if deg_c else 1.0
+            for n in G.nodes():
+                size = 10 + 30 * (deg_c.get(n, 0) / max_deg if max_deg else 0)
+                label = n
+                title = f"{n}<br>Degree:{deg_c.get(n,0):.3f} / Bet:{btw_c.get(n,0):.3f} / Eig:{eig_c.get(n,0) if not math.isnan(eig_c.get(n,np.nan)) else 'NA'}"
+                nt.add_node(n, label=label, title=title, value=size)
+
+            for u, v, d in G.edges(data=True):
+                w = d.get("weight", 1)
+                nt.add_edge(u, v, value=w, title=f"共著回数: {w}")
+
+            html_file = "author_network.html"
+            nt.show(html_file)
+            with open(html_file, "r", encoding="utf-8") as f:
+                html = f.read()
+            st.components.v1.html(html, height=700, scrolling=True)
+        else:
+            # matplotlib フォールバック
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots(figsize=(10, 8))
+            pos = nx.spring_layout(G, k=0.6, seed=42, weight="weight")
+            # ノードサイズ：Degree
+            deg_vals = np.array([deg_c.get(n, 0.0) for n in G.nodes()])
+            sizes = 100 + 1200 * (deg_vals / (deg_vals.max() if deg_vals.max() > 0 else 1))
+            nx.draw_networkx_nodes(G, pos, node_size=sizes, node_color="#69b3a2", alpha=0.8, ax=ax)
+            # エッジは重みで太さ
+            widths = [0.5 + 2.5 * (G[u][v].get("weight", 1) / max(1, max(nx.get_edge_attributes(G, "weight").values()))) for u,v in G.edges()]
+            nx.draw_networkx_edges(G, pos, width=widths, alpha=0.4, ax=ax)
+            nx.draw_networkx_labels(G, pos, font_size=8, ax=ax)
+            ax.axis("off")
+            st.pyplot(fig)
