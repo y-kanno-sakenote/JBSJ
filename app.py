@@ -9,6 +9,7 @@
 - お気に入り一覧（常設・★で解除/追加）
 - お気に入りタグ付け：お気に入り表の「tags」列を直接編集（カンマ/空白区切り）
 - 「❌ 全て外す」ボタンでお気に入り一括解除
+- ★新機能：検索結果の論文の著者名をクリックすると、その著者でフィルターがかかる
 """
 
 import io, re, time
@@ -383,7 +384,12 @@ if "authors_sel" not in st.session_state:
 
 def filter_by_author(author_name):
     st.session_state.authors_sel = [author_name]
-    st.rerun()
+    # st.rerun() # ← ページの再実行をしない
+
+def handle_author_select(selected_readings):
+    reading2author = dict(zip(st.session_state.author_candidates["reading"], st.session_state.author_candidates["author"]))
+    st.session_state.authors_sel = sorted({reading2author[r] for r in selected_readings}) if selected_readings else []
+    # st.rerun() # ← ページの再実行をしない
 
 row2_author, row2_radio = st.columns([1.0, 2.0])   # ← 著者欄を短めにしてラジオに幅を多めに
 
@@ -395,45 +401,33 @@ with row2_radio:
     "著者イニシャル選択",
     options=initials,
     horizontal=True,
-    key="author_initial",   # ← これが唯一のソースオブトゥルース
+    key="author_initial",
 )
 
-# 以降は session_state から読むだけ（代入しない）
 ini = st.session_state["author_initial"]
-# authors_readings.csv を読み込み
+if "author_candidates" not in st.session_state:
+    st.session_state.author_candidates = load_authors_readings(AUTHORS_CSV_PATH)
+
 with row2_author:
-    adf = load_authors_readings(AUTHORS_CSV_PATH)
+    adf = st.session_state.author_candidates
     if adf is not None and not adf.empty:
         cand = adf.copy()
 
-        # --- （以下は従来と同じフィルタ＆並び替え処理）---
         GOJUON = {
-            "あ": "あいうえお",
-            "か": "かきくけこがぎぐげご",
-            "さ": "さしすせそざじずぜぞ",
-            "た": "たちつてとだぢづでど",
-            "な": "なにぬねの",
-            "は": "はひふへほばびぶべぼぱぴぷぺぽ",
-            "ま": "まみむめも",
-            "や": "やゆよ",
-            "ら": "らりるれろ",
-            "わ": "わをん",
+            "あ": "あいうえお", "か": "かきくけこがぎぐげご", "さ": "さしすせそざじずぜぞ",
+            "た": "たちつてとだぢづでど", "な": "なにぬねの", "は": "はひふへほばびぶべぼぱぴぷぺぽ",
+            "ま": "まみむめも", "や": "やゆよ", "ら": "らりるれろ", "わ": "わをん",
         }
-
         def kata_to_hira(s: str) -> str:
             out = []
             for ch in str(s or ""):
                 o = ord(ch)
-                if 0x30A1 <= o <= 0x30F6:
-                    out.append(chr(o - 0x60))
-                else:
-                    out.append(ch)
+                if 0x30A1 <= o <= 0x30F6: out.append(chr(o - 0x60))
+                else: out.append(ch)
             return "".join(out)
-
         def hira_head(s: str) -> str | None:
             s = str(s or "")
             return kata_to_hira(s)[0] if s else None
-
         def is_roman_head(s: str) -> bool:
             return bool(re.match(r"[A-Za-z]", str(s or "")))
 
@@ -445,8 +439,6 @@ with row2_author:
             cand = cand[cand["reading"].apply(
                 lambda s: (not is_roman_head(s)) and (hira_head(s) in allowed if hira_head(s) else False)
             )]
-
-        # 並び順
         AIUEO_ORDER = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん"
         def sort_tuple(reading: str):
             if not reading: return (3, 999, "")
@@ -484,10 +476,6 @@ with row2_author:
         authors_all = build_author_candidates(df)
         st.session_state.authors_sel = st.multiselect("著者", authors_all, default=st.session_state.authors_sel)
 
-# 念のため未定義ガード
-if 'authors_sel' not in st.session_state: st.session_state.authors_sel = []
-if 'targets_sel' not in locals(): targets_sel = []
-if 'types_sel'   not in locals(): types_sel   = []
 # -------------------- 検索フィルタ（3段目：キーワード） --------------------
 kw_row1, kw_row2 = st.columns([3, 1])
 with kw_row1:
@@ -530,57 +518,84 @@ filtered = apply_filters(df)
 st.markdown("### 検索結果")
 st.caption(f"{len(filtered)} / {len(df)} 件")
 
-visible_cols = make_visible_cols(filtered)
+# --- カスタムテーブルのヘッダー ---
+header_cols = st.columns([0.5, 1, 1, 3, 2, 1, 1])
+with header_cols[0]: st.markdown("★")
+with header_cols[1]: st.markdown("発行年")
+with header_cols[2]: st.markdown("巻数/号数")
+with header_cols[3]: st.markdown("論文タイトル")
+with header_cols[4]: st.markdown("著者")
+with header_cols[5]: st.markdown("HP")
+with header_cols[6]: st.markdown("PDF")
 
-# ★ ここで summary の位置を調整（著者の右に挿入）
-if "著者" in visible_cols and "summary" in filtered.columns:
-    idx = visible_cols.index("著者")
-    if "summary" not in visible_cols:
-        visible_cols.insert(idx + 1, "summary")
+st.markdown("---")
 
-disp = filtered.loc[:, visible_cols].copy()
-disp["_row_id"] = disp.apply(make_row_id, axis=1)
+def toggle_fav(row_id):
+    if row_id in st.session_state.favs:
+        st.session_state.favs.discard(row_id)
+    else:
+        st.session_state.favs.add(row_id)
 
-# セッション初期化：お気に入り集合／タグ辞書
-if "favs" not in st.session_state:
-    st.session_state.favs = set()
-if "fav_tags" not in st.session_state:
-    st.session_state.fav_tags = {}   # row_id -> set(tags)
+def filter_by_author_callback(author_name):
+    st.session_state.authors_sel = [author_name]
 
-# メイン表：お気に入りチェック列
-disp["★"] = disp["_row_id"].apply(lambda rid: rid in st.session_state.favs)
+# --- カスタムテーブルの行 ---
+for idx, row in filtered.iterrows():
+    row_id = make_row_id(row)
+    fav_state = row_id in st.session_state.favs
+    
+    row_cols = st.columns([0.5, 1, 1, 3, 2, 1, 1])
+    
+    # ★ チェックボックス
+    with row_cols[0]:
+        st.checkbox(
+            "", 
+            value=fav_state, 
+            key=f"fav_{row_id}", 
+            label_visibility="collapsed",
+            on_change=toggle_fav,
+            args=(row_id,)
+        )
+    
+    # 発行年
+    with row_cols[1]:
+        st.write(str(row.get("発行年", "")))
+    
+    # 巻数/号数
+    with row_cols[2]:
+        vol = row.get("巻数", "")
+        issue = row.get("号数", "")
+        st.write(f"{vol}巻{issue}号")
 
-# LinkColumn 設定
-column_config = {
-    "★": st.column_config.CheckboxColumn("★", help="気になる論文にチェック/解除", default=False, width="small"),
-}
-if "HPリンク先" in disp.columns:
-    column_config["HPリンク先"] = st.column_config.LinkColumn("HPリンク先", help="外部サイトへ移動", display_text="HP")
-if "PDFリンク先" in disp.columns:
-    column_config["PDFリンク先"] = st.column_config.LinkColumn("PDFリンク先", help="PDFを開く", display_text="PDF")
+    # 論文タイトル
+    with row_cols[3]:
+        st.write(row.get("論文タイトル", ""))
 
-display_order = ["★"] + [c for c in disp.columns if c not in ["★", "_row_id"]] + ["_row_id"]
+    # 著者 + 検索ボタン
+    with row_cols[4]:
+        authors = split_authors(row.get("著者", ""))
+        for i, author in enumerate(authors):
+            st.button(
+                f"{author} 🔎", 
+                key=f"filter_btn_{row_id}_{i}", 
+                on_click=filter_by_author_callback, 
+                args=(author,),
+                use_container_width=True
+            )
+            
+    # HPリンク
+    with row_cols[5]:
+        hp_link = row.get("HPリンク先", "")
+        if hp_link:
+            st.markdown(f"[HP]({hp_link})")
 
-# --- メイン表（フォームで一括反映） ---
-st.subheader("論文リスト")
-with st.form("main_table_form", clear_on_submit=False):
-    edited_main = st.data_editor(
-        disp[display_order],
-        key="main_editor",
-        use_container_width=True,
-        hide_index=True,
-        column_config=column_config,
-        disabled=[c for c in display_order if c != "★"],  # ★のみ編集可
-        height=520,
-        num_rows="fixed",
-    )
-    apply_main = st.form_submit_button("チェックした論文をお気に入りリストに追加", use_container_width=True)
+    # PDFリンク
+    with row_cols[6]:
+        pdf_link = row.get("PDFリンク先", "")
+        if pdf_link:
+            st.markdown(f"[PDF]({pdf_link})")
 
-if apply_main:
-    subset_ids_main = set(disp["_row_id"].tolist())
-    checked_subset_main = set(edited_main.loc[edited_main["★"] == True, "_row_id"].tolist())
-    st.session_state.favs = (st.session_state.favs - subset_ids_main) | checked_subset_main
-    st.rerun()
+st.markdown("---")
 
 # --- お気に入り一覧ヘッダー＋全外しボタン（横並び） ---
 c1, c2 = st.columns([6, 1])
@@ -594,7 +609,6 @@ with c2:
 # お気に入り一覧（フィルタ無視で全体から）＋ tags 列（編集可）
 visible_cols_full = make_visible_cols(df)
 
-# ★ こちらも同じように summary を著者の右へ
 if "著者" in visible_cols_full and "summary" in df.columns:
     idx = visible_cols_full.index("著者")
     if "summary" not in visible_cols_full:
