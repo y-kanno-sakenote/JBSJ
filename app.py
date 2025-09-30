@@ -11,11 +11,14 @@
 - 「❌ 全て外す」ボタンでお気に入り一括解除
 """
 
-import io, re, time
+import io, re, time, itertools
 import pandas as pd
 import requests
 import streamlit as st
+import networkx as nx
+from pyvis.network import Network
 from pathlib import Path
+import streamlit.components.v1 as components
 
 # -------------------- ページ設定 --------------------
 st.set_page_config(page_title="論文検索（統一UI版）", layout="wide")
@@ -745,3 +748,84 @@ with c_dl2:
         use_container_width=True,
         disabled=fav_export.empty
     )
+
+# -------------------- 共起ネットワーク構築 --------------------
+def build_coauthor_network(df, min_weight=2):
+    edge_counts = {}
+    for authors in df["著者"].dropna():
+        alist = [a.strip() for a in re.split(r"[;,、，]", str(authors)) if a.strip()]
+        for a, b in itertools.combinations(sorted(set(alist)), 2):
+            key = frozenset([a, b])
+            edge_counts[key] = edge_counts.get(key, 0) + 1
+    
+    G = nx.Graph()
+    for pair, w in edge_counts.items():
+        if w >= min_weight:
+            a, b = tuple(pair)
+            G.add_edge(a, b, weight=w)
+    return G
+
+def centrality_ranking(G, topn=20):
+    if len(G) == 0:
+        return pd.DataFrame(columns=["著者","次数","次数中心性","媒介中心性","PageRank"])
+    deg = nx.degree_centrality(G)
+    bet = nx.betweenness_centrality(G)
+    pr  = nx.pagerank(G, weight="weight")
+    rows = []
+    for n in G.nodes():
+        rows.append({
+            "著者": n,
+            "次数": G.degree(n, weight="weight"),
+            "次数中心性": round(deg[n], 3),
+            "媒介中心性": round(bet[n], 3),
+            "PageRank": round(pr[n], 3),
+        })
+    return pd.DataFrame(rows).sort_values("PageRank", ascending=False).head(topn)
+
+def visualize_network(G, height="600px", width="100%"):
+    net = Network(height=height, width=width, notebook=False, directed=False)
+    net.from_nx(G)
+    net.repulsion(node_distance=150, spring_length=200)
+    return net
+
+# ==================== Streamlit UI ====================
+st.title("醸造協会誌　論文検索 & 分析")
+
+tab_search, tab_analysis = st.tabs(["🔍 検索", "📊 分析"])
+
+with tab_search:
+    # -------------------- 既存の検索UI・テーブル・お気に入りなど --------------------
+    # （ここにはユーザーの最新版 app.py の検索部分をそのまま入れてください）
+    st.info("ここに既存の検索システムを表示（省略）")
+
+with tab_analysis:
+    st.subheader("著者共起ネットワーク分析")
+
+    # min_weight を選べるようにする
+    min_w = st.slider("共起回数のしきい値", 1, 5, 2)
+
+    if "filtered" not in locals():
+        st.warning("先に『検索』タブでデータを絞り込んでください。")
+    else:
+        G = build_coauthor_network(filtered, min_weight=min_w)
+        if len(G.nodes) == 0:
+            st.info("共起ネットワークが構築できませんでした。")
+        else:
+            # ネットワーク可視化
+            net = visualize_network(G)
+            net.save_graph("coauthor_network.html")
+            with open("coauthor_network.html", "r", encoding="utf-8") as f:
+                html = f.read()
+            components.html(html, height=650, scrolling=True)
+
+            # 中心性ランキング
+            st.subheader("中心性ランキング")
+            cent_df = centrality_ranking(G, topn=20)
+            st.dataframe(cent_df, use_container_width=True)
+
+            st.download_button(
+                "📥 ランキングCSVダウンロード",
+                data=cent_df.to_csv(index=False).encode("utf-8-sig"),
+                file_name=f"centrality_{time.strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
