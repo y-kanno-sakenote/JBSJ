@@ -9,7 +9,6 @@
 - お気に入り一覧（常設・★で解除/追加）
 - お気に入りタグ付け：お気に入り表の「tags」列を直接編集（カンマ/空白区切り）
 - 「❌ 全て外す」ボタンでお気に入り一括解除
-- ★新機能：検索結果の論文リストにおける著者列をクリックしたらその著者が著者フィルタ欄に入る
 """
 
 import io, re, time
@@ -21,6 +20,33 @@ from pathlib import Path
 # -------------------- ページ設定 --------------------
 st.set_page_config(page_title="論文検索（統一UI版）", layout="wide")
 
+# -------------------- JavaScriptでスクロール位置を保存・復元する関数 --------------------
+def scroll_to_position(pos: int):
+    js_code = f"""
+        var element = document.getElementById('main-container');
+        if (element) {{
+            element.scrollTop = {pos};
+        }}
+    """
+    st.components.v1.html(f"<script>{js_code}</script>", height=0, width=0)
+
+def save_scroll_position():
+    js_code = """
+        var element = document.getElementById('main-container');
+        if (element) {{
+            window.parent.postMessage({{
+                'streamlit:setFrameHeight': {{
+                    'height': element.scrollHeight,
+                    'scrollPosition': element.scrollTop
+                }},
+                'streamlit:saveScrollPosition': element.scrollTop
+            }}, '*');
+        }}
+    """
+    st.components.v1.html(f"<script>{js_code}</script>", height=0, width=0)
+
+if 'scroll_pos' not in st.session_state:
+    st.session_state.scroll_pos = 0
 
 # -------------------- コントラスト（著者ドロップダウン強化版） --------------------
 st.markdown(
@@ -488,17 +514,12 @@ with row2_author:
             format_func=lambda r: f"{reading2author.get(r, r)}｜{r}",
             placeholder="例：やまだ / さとう / たかはし ...",
             on_change=handle_author_multiselect,
-            args=(authors_sel_readings,) # これが問題の行
+            args=(authors_sel_readings,)
         )
-        # st.session_state.authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
+        st.session_state.authors_sel = sorted({reading2author[r] for r in authors_sel_readings}) if authors_sel_readings else []
     else:
         authors_all = build_author_candidates(df)
         st.session_state.authors_sel = st.multiselect("著者", authors_all, default=st.session_state.authors_sel)
-
-# 念のため未定義ガード
-if 'authors_sel' not in st.session_state: st.session_state.authors_sel = []
-if 'targets_sel' not in locals(): targets_sel = []
-if 'types_sel'   not in locals(): types_sel   = []
 
 # -------------------- 検索フィルタ（3段目：キーワード） --------------------
 kw_row1, kw_row2 = st.columns([3, 1])
@@ -562,28 +583,33 @@ if "fav_tags" not in st.session_state:
 # メイン表：お気に入りチェック列
 disp["★"] = disp["_row_id"].apply(lambda rid: rid in st.session_state.favs)
 
+# on_changeコールバック関数を定義
 def handle_main_editor_change():
-    edited_rows_dict = st.session_state.main_editor['edited_rows']
-    for row_index, row_changes in edited_rows_dict.items():
-        row_id = disp.iloc[int(row_index)]['_row_id']
-        if '★' in row_changes:
-            if row_changes['★']:
-                st.session_state.favs.add(row_id)
-            else:
-                st.session_state.favs.discard(row_id)
-    # on_changeで直接stateを変更すればrerunは不要
-    # ただし、他のウィジェットの変更を即座に反映させる場合はrerunが必要
+    if 'main_editor' in st.session_state and 'edited_rows' in st.session_state.main_editor:
+        edited_rows = st.session_state.main_editor['edited_rows']
+        
+        for row_index_str, changes in edited_rows.items():
+            row_index = int(row_index_str)
+            if '★' in changes:
+                row_id = disp.iloc[row_index]['_row_id']
+                if changes['★']:
+                    st.session_state.favs.add(row_id)
+                else:
+                    st.session_state.favs.discard(row_id)
+        # on_change で直接stateを変更しているのでrerunは不要
 
-# --- メイン表（on_changeで一括反映） ---
-st.subheader("論文リスト")
-
+# LinkColumn 設定
 column_config = {
     "★": st.column_config.CheckboxColumn("★", help="気になる論文にチェック/解除", default=False, width="small"),
-    "HPリンク先": st.column_config.LinkColumn("HPリンク先", help="外部サイトへ移動", display_text="HP"),
-    "PDFリンク先": st.column_config.LinkColumn("PDFリンク先", help="PDFを開く", display_text="PDF"),
 }
+if "HPリンク先" in disp.columns:
+    column_config["HPリンク先"] = st.column_config.LinkColumn("HPリンク先", help="外部サイトへ移動", display_text="HP")
+if "PDFリンク先" in disp.columns:
+    column_config["PDFリンク先"] = st.column_config.LinkColumn("PDFリンク先", help="PDFを開く", display_text="PDF")
 
 display_order = ["★"] + [c for c in disp.columns if c not in ["★", "_row_id"]] + ["_row_id"]
+
+st.subheader("論文リスト")
 
 st.data_editor(
     disp[display_order],
@@ -647,7 +673,7 @@ def handle_fav_editor_change():
             elif row_id in st.session_state.fav_tags:
                 del st.session_state.fav_tags[row_id]
                 
-    st.rerun()
+    st.rerun() # タグの変更は再描画が必要
 
 if not fav_disp.empty:
     fav_disp["★"] = fav_disp["_row_id"].apply(lambda rid: rid in st.session_state.favs)
