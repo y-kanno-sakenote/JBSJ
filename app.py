@@ -378,6 +378,13 @@ with row1_tp:
     types_sel = st.multiselect("研究タイプ（複数選択／部分一致）", types_all, default=[])
 
 # -------------------- 検索フィルタ（2段目：著者 + イニシャルラジオ横並び） --------------------
+if "authors_sel" not in st.session_state:
+    st.session_state.authors_sel = []
+
+def filter_by_author(author_name):
+    st.session_state.authors_sel = [author_name]
+    st.rerun()
+
 row2_author, row2_radio = st.columns([1.0, 2.0])   # ← 著者欄を短めにしてラジオに幅を多めに
 
 with row2_radio:
